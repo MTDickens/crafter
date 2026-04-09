@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import functools
 import pathlib
 
@@ -21,13 +22,33 @@ class staticproperty:
     return self.function()
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeRules:
+
+  spawn_objects: bool = True
+  spawn_random_objects: bool = True
+  move_objects: bool = True
+  move_random_objects: bool = True
+  hunger_decreases: bool = True
+  thirst_decreases: bool = True
+  energy_decreases: bool = True
+  daylight_cycle: bool = True
+
+  def allows_spawn(self, is_random):
+    return self.spawn_objects and (not is_random or self.spawn_random_objects)
+
+  def allows_movement(self, is_random):
+    return self.move_objects and (not is_random or self.move_random_objects)
+
+
 class World:
 
-  def __init__(self, area, materials, chunk_size):
+  def __init__(self, area, materials, chunk_size, runtime_rules=None):
     self.area = area
     self._chunk_size = chunk_size
     self._mat_names = {i: x for i, x in enumerate([None] + materials)}
     self._mat_ids = {x: i for i, x in enumerate([None] + materials)}
+    self.runtime_rules = runtime_rules or RuntimeRules()
     self.reset()
 
   def reset(self, seed=None):

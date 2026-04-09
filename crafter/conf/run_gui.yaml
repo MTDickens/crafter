@@ -1,0 +1,28 @@
+seed: null
+area: [64, 64]
+view: [9, 9]
+length: null
+health: 9
+window: [600, 600]
+size: [0, 0]
+record: null
+fps: 5
+wait: false
+death: reset
+
+runtime:
+  spawn_objects: false
+  spawn_random_objects: true
+  move_objects: false
+  move_random_objects: true
+  hunger_decreases: false
+  thirst_decreases: false
+  energy_decreases: false
+  daylight_cycle: false
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false

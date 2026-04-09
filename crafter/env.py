@@ -26,7 +26,11 @@ class Env(BaseClass):
 
   def __init__(
       self, area=(64, 64), view=(9, 9), size=(64, 64),
-      reward=True, length=10000, seed=None):
+      reward=True, length=10000, seed=None,
+      spawn_objects=True, spawn_random_objects=True,
+      move_objects=True, move_random_objects=True,
+      hunger_decreases=True, thirst_decreases=True,
+      energy_decreases=True, daylight_cycle=True):
     view = np.array(view if hasattr(view, '__len__') else (view, view))
     size = np.array(size if hasattr(size, '__len__') else (size, size))
     seed = np.random.randint(0, 2**31 - 1) if seed is None else seed
@@ -37,7 +41,17 @@ class Env(BaseClass):
     self._length = length
     self._seed = seed
     self._episode = 0
-    self._world = engine.World(area, constants.materials, (12, 12))
+    self._runtime_rules = engine.RuntimeRules(
+        spawn_objects=spawn_objects,
+        spawn_random_objects=spawn_random_objects,
+        move_objects=move_objects,
+        move_random_objects=move_random_objects,
+        hunger_decreases=hunger_decreases,
+        thirst_decreases=thirst_decreases,
+        energy_decreases=energy_decreases,
+        daylight_cycle=daylight_cycle)
+    self._world = engine.World(
+        area, constants.materials, (12, 12), self._runtime_rules)
     self._textures = engine.Textures(constants.root / 'assets')
     item_rows = int(np.ceil(len(constants.items) / view[0]))
     self._local_view = engine.LocalView(
@@ -133,6 +147,9 @@ class Env(BaseClass):
     return self.render()
 
   def _update_time(self):
+    if not self._runtime_rules.daylight_cycle:
+      self._world.daylight = 1.0
+      return
     # https://www.desmos.com/calculator/grfbc6rs3h
     progress = (self._step / 300) % 1 + 0.3
     daylight = 1 - np.abs(np.cos(np.pi * progress)) ** 3
@@ -162,7 +179,10 @@ class Env(BaseClass):
     creatures = [obj for obj in objs if isinstance(obj, cls)]
     mask = self._world.mask(*chunk, material)
     target_min, target_max = target_fn(len(creatures), mask.sum())
-    if len(creatures) < int(target_min) and random.uniform() < spawn_prob:
+    if (
+        self._runtime_rules.allows_spawn(is_random=True) and
+        len(creatures) < int(target_min) and
+        random.uniform() < spawn_prob):
       xs = np.tile(np.arange(xmin, xmax)[:, None], [1, ymax - ymin])
       ys = np.tile(np.arange(ymin, ymax)[None, :], [xmax - xmin, 1])
       xs, ys = xs[mask], ys[mask]

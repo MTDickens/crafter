@@ -62,6 +62,8 @@ def _set_material(world, pos, player, tunnels, simplex):
 
 
 def _set_object(world, pos, player, tunnels):
+  if not world.runtime_rules.allows_spawn(is_random=True):
+    return
   x, y = pos
   uniform = world.random.uniform
   dist = np.sqrt((x - player.pos[0]) ** 2 + (y - player.pos[1]) ** 2)

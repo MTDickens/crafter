@@ -42,4 +42,4 @@ crafter = "crafter.run_gui:main"
 packages = ["crafter"]
 
 [tool.setuptools.package-data]
-crafter = ["data.yaml", "assets/*"]
+crafter = ["data.yaml", "assets/*", "conf/*.yaml"]

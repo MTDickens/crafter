@@ -1,33 +1,26 @@
-import argparse
+import pathlib
 
+import hydra
 import numpy as np
 try:
   import pygame
 except ImportError:
   print('Please install the pygame package to use the GUI.')
   raise
+from omegaconf import DictConfig
 from PIL import Image
 
 import crafter
 
 
-def main():
-  boolean = lambda x: bool(['False', 'True'].index(x))
-  parser = argparse.ArgumentParser()
-  parser.add_argument('--seed', type=int, default=None)
-  parser.add_argument('--area', nargs=2, type=int, default=(64, 64))
-  parser.add_argument('--view', type=int, nargs=2, default=(9, 9))
-  parser.add_argument('--length', type=int, default=None)
-  parser.add_argument('--health', type=int, default=9)
-  parser.add_argument('--window', type=int, nargs=2, default=(600, 600))
-  parser.add_argument('--size', type=int, nargs=2, default=(0, 0))
-  parser.add_argument('--record', type=str, default=None)
-  parser.add_argument('--fps', type=int, default=5)
-  parser.add_argument('--wait', type=boolean, default=False)
-  parser.add_argument('--death', type=str, default='reset', choices=[
-      'continue', 'reset', 'quit'])
-  args = parser.parse_args()
+def _print_actions(keymap):
+  print('Actions:')
+  for key, action in keymap.items():
+    print(f'  {pygame.key.name(key)}: {action}')
 
+
+@hydra.main(version_base=None, config_path='conf', config_name='run_gui')
+def main(config: DictConfig):
   keymap = {
       pygame.K_a: 'move_left',
       pygame.K_d: 'move_right',
@@ -48,20 +41,32 @@ def main():
       pygame.K_5: 'make_stone_sword',
       pygame.K_6: 'make_iron_sword',
   }
-  print('Actions:')
-  for key, action in keymap.items():
-    print(f'  {pygame.key.name(key)}: {action}')
+  _print_actions(keymap)
 
-  crafter.constants.items['health']['max'] = args.health
-  crafter.constants.items['health']['initial'] = args.health
+  crafter.constants.items['health']['max'] = config.health
+  crafter.constants.items['health']['initial'] = config.health
 
-  size = list(args.size)
-  size[0] = size[0] or args.window[0]
-  size[1] = size[1] or args.window[1]
+  size = list(config.size)
+  size[0] = size[0] or config.window[0]
+  size[1] = size[1] or config.window[1]
 
+  record = (
+      pathlib.Path(hydra.utils.to_absolute_path(config.record))
+      if config.record else None)
   env = crafter.Env(
-      area=args.area, view=args.view, length=args.length, seed=args.seed)
-  env = crafter.Recorder(env, args.record)
+      area=config.area,
+      view=config.view,
+      length=config.length,
+      seed=config.seed,
+      spawn_objects=config.runtime.spawn_objects,
+      spawn_random_objects=config.runtime.spawn_random_objects,
+      move_objects=config.runtime.move_objects,
+      move_random_objects=config.runtime.move_random_objects,
+      hunger_decreases=config.runtime.hunger_decreases,
+      thirst_decreases=config.runtime.thirst_decreases,
+      energy_decreases=config.runtime.energy_decreases,
+      daylight_cycle=config.runtime.daylight_cycle)
+  env = crafter.Recorder(env, record)
   env.reset()
   achievements = set()
   duration = 0
@@ -70,21 +75,21 @@ def main():
   print('Diamonds exist:', env._world.count('diamond'))
 
   pygame.init()
-  screen = pygame.display.set_mode(args.window)
+  screen = pygame.display.set_mode(config.window)
   clock = pygame.time.Clock()
   running = True
   while running:
 
     # Rendering.
     image = env.render(size)
-    if size != args.window:
+    if size != config.window:
       image = Image.fromarray(image)
-      image = image.resize(args.window, resample=Image.NEAREST)
+      image = image.resize(config.window, resample=Image.NEAREST)
       image = np.array(image)
     surface = pygame.surfarray.make_surface(image.transpose((1, 0, 2)))
     screen.blit(surface, (0, 0))
     pygame.display.flip()
-    clock.tick(args.fps)
+    clock.tick(config.fps)
 
     # Keyboard input.
     action = None
@@ -94,7 +99,7 @@ def main():
         running = False
       elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
         running = False
-      elif event.type == pygame.KEYDOWN and event.key in keymap.keys():
+      elif event.type == pygame.KEYDOWN and event.key in keymap:
         action = keymap[event.key]
     if action is None:
       pressed = pygame.key.get_pressed()
@@ -102,7 +107,7 @@ def main():
         if pressed[key]:
           break
       else:
-        if args.wait and not env._player.sleeping:
+        if config.wait and not env._player.sleeping:
           continue
         else:
           action = 'noop'
@@ -131,16 +136,16 @@ def main():
       print('Episode done!')
       print('Duration:', duration)
       print('Return:', return_)
-      if args.death == 'quit':
+      if config.death == 'quit':
         running = False
-      if args.death == 'reset':
+      if config.death == 'reset':
         print('\nStarting a new episode.')
         env.reset()
         achievements = set()
         was_done = False
         duration = 0
         return_ = 0
-      if args.death == 'continue':
+      if config.death == 'continue':
         pass
 
   pygame.quit()

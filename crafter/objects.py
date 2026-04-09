@@ -131,24 +131,27 @@ class Player(Object):
     self._wake_up_when_hurt()
 
   def _update_life_stats(self):
-    self._hunger += 0.5 if self.sleeping else 1
-    if self._hunger > 25:
-      self._hunger = 0
-      self.inventory['food'] -= 1
-    self._thirst += 0.5 if self.sleeping else 1
-    if self._thirst > 20:
-      self._thirst = 0
-      self.inventory['drink'] -= 1
-    if self.sleeping:
-      self._fatigue = min(self._fatigue - 1, 0)
-    else:
-      self._fatigue += 1
-    if self._fatigue < -10:
-      self._fatigue = 0
-      self.inventory['energy'] += 1
-    if self._fatigue > 30:
-      self._fatigue = 0
-      self.inventory['energy'] -= 1
+    if self.world.runtime_rules.hunger_decreases:
+      self._hunger += 0.5 if self.sleeping else 1
+      if self._hunger > 25:
+        self._hunger = 0
+        self.inventory['food'] -= 1
+    if self.world.runtime_rules.thirst_decreases:
+      self._thirst += 0.5 if self.sleeping else 1
+      if self._thirst > 20:
+        self._thirst = 0
+        self.inventory['drink'] -= 1
+    if self.world.runtime_rules.energy_decreases:
+      if self.sleeping:
+        self._fatigue = min(self._fatigue - 1, 0)
+      else:
+        self._fatigue += 1
+      if self._fatigue < -10:
+        self._fatigue = 0
+        self.inventory['energy'] += 1
+      if self._fatigue > 30:
+        self._fatigue = 0
+        self.inventory['energy'] -= 1
 
   def _degen_or_regen_health(self):
     necessities = (
@@ -274,7 +277,9 @@ class Cow(Object):
   def update(self):
     if self.health <= 0:
       self.world.remove(self)
-    if self.random.uniform() < 0.5:
+    if (
+        self.world.runtime_rules.allows_movement(is_random=True) and
+        self.random.uniform() < 0.5):
       direction = self.random_dir()
       self.move(direction)
 
@@ -295,10 +300,11 @@ class Zombie(Object):
     if self.health <= 0:
       self.world.remove(self)
     dist = self.distance(self.player)
-    if dist <= 8 and self.random.uniform() < 0.9:
-      self.move(self.toward(self.player, self.random.uniform() < 0.8))
-    else:
-      self.move(self.random_dir())
+    if self.world.runtime_rules.allows_movement(is_random=True):
+      if dist <= 8 and self.random.uniform() < 0.9:
+        self.move(self.toward(self.player, self.random.uniform() < 0.8))
+      else:
+        self.move(self.random_dir())
     dist = self.distance(self.player)
     if dist <= 1:
       if self.cooldown:
@@ -329,18 +335,21 @@ class Skeleton(Object):
       self.world.remove(self)
     self.reload = max(0, self.reload - 1)
     dist = self.distance(self.player.pos)
-    if dist <= 3:
+    can_move = self.world.runtime_rules.allows_movement(is_random=True)
+    if can_move and dist <= 3:
       moved = self.move(-self.toward(self.player, self.random.uniform() < 0.6))
       if moved:
         return
     if dist <= 5 and self.random.uniform() < 0.5:
       self._shoot(self.toward(self.player))
-    elif dist <= 8 and self.random.uniform() < 0.3:
+    elif can_move and dist <= 8 and self.random.uniform() < 0.3:
       self.move(self.toward(self.player, self.random.uniform() < 0.6))
-    elif self.random.uniform() < 0.2:
+    elif can_move and self.random.uniform() < 0.2:
       self.move(self.random_dir())
 
   def _shoot(self, direction):
+    if not self.world.runtime_rules.allows_spawn(is_random=True):
+      return
     if self.reload > 0:
       return
     if direction[0] == 0 and direction[1] == 0:
@@ -371,6 +380,8 @@ class Arrow(Object):
     return constants.walkable + ['water', 'lava']
 
   def update(self):
+    if not self.world.runtime_rules.allows_movement(is_random=False):
+      return
     target = self.pos + self.facing
     material, obj = self.world[target]
     if obj:
