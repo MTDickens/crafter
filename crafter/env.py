@@ -33,6 +33,10 @@ class Env(BaseClass):
       energy_decreases=True, daylight_cycle=True):
     view = np.array(view if hasattr(view, '__len__') else (view, view))
     size = np.array(size if hasattr(size, '__len__') else (size, size))
+    if np.any(size < view):
+      raise ValueError(
+          f'Render size {tuple(size)} must be at least as large as view '
+          f'{tuple(view)} so each tile has positive size.')
     seed = np.random.randint(0, 2**31 - 1) if seed is None else seed
     self._area = area
     self._view = view

@@ -1,9 +1,9 @@
 seed: null
 area: [64, 64]
-view: [9, 9]
+view: [70, 70]
 length: null
 health: 9
-window: [600, 600]
+window: [1000, 1000]
 size: [0, 0]
 record: null
 fps: 5

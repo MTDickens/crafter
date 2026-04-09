@@ -56,6 +56,7 @@ def main(config: DictConfig):
   env = crafter.Env(
       area=config.area,
       view=config.view,
+      size=size,
       length=config.length,
       seed=config.seed,
       spawn_objects=config.runtime.spawn_objects,
