@@ -3,6 +3,7 @@ area: [64, 64]
 view: [70, 70]
 length: null
 health: 9
+sapling_from_grass_probability: 0.0
 window: [1000, 1000]
 size: [0, 0]
 record: null
