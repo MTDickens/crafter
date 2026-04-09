@@ -45,6 +45,8 @@ def main(config: DictConfig):
 
   crafter.constants.items['health']['max'] = config.health
   crafter.constants.items['health']['initial'] = config.health
+  crafter.constants.collect['grass']['probability'] = (
+      config.sapling_from_grass_probability)
 
   size = list(config.size)
   size[0] = size[0] or config.window[0]
