@@ -5,6 +5,7 @@ import time
 import numpy as np
 
 import crafter
+import crafter.constants
 
 
 def main():
