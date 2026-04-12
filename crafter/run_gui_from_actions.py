@@ -86,11 +86,8 @@ def get_actions_from_user(keymap: dict[int, str], config: DictConfig) -> list[st
             "Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end input."
         )
         action_prefixes = input("Actions: ")
-        actions = [
-            a
-            for a in [parse_action_prefix(p) for p in action_prefixes.split(",")]
-            if a is not None
-        ]
+        action_tokens = [token.strip() for token in action_prefixes.split(",")]
+        actions = [parse_action_prefix(token) for token in action_tokens if token]
     elif actions_input_source == "file":
         if not config.actions_input_file_path:
             raise ValueError(
@@ -179,7 +176,9 @@ def main(config: DictConfig):
     clock = pygame.time.Clock()
     running = True
 
+    actions: list[str] = []
     action_idx = 0
+    actions_loaded = False
 
     while running:
         # Rendering.
@@ -199,8 +198,9 @@ def main(config: DictConfig):
 
         # Get actions from user at the beginning of the episode after rendering the initial state
         # so that user can see the initial state before providing actions.
-        if action_idx == 0:
-            actions: list[str] = get_actions_from_user(keymap, config)
+        if not actions_loaded:
+            actions = get_actions_from_user(keymap, config)
+            actions_loaded = True
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -262,6 +262,9 @@ def main(config: DictConfig):
                 was_done = False
                 duration = 0
                 return_ = 0
+                actions = []
+                action_idx = 0
+                actions_loaded = False
             if config.death == "continue":
                 pass
 
