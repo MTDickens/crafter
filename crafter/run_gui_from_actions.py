@@ -1,3 +1,5 @@
+"""Run the Crafter environment with a series of actions provided by the user."""
+
 import pathlib
 
 import hydra
@@ -15,7 +17,7 @@ def _print_actions(keymap):
         print(f"  {pygame.key.name(key)}: {action}")
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="run_gui")
+@hydra.main(version_base=None, config_path="conf", config_name="run_gui_from_actions")
 def main(config: DictConfig):
     keymap = {
         pygame.K_a: "move_left",
@@ -35,6 +37,9 @@ def main(config: DictConfig):
         pygame.K_5: "make_stone_sword",
         pygame.K_6: "make_iron_sword",
     }
+    action_components_list = [
+        action.split("_") for action in keymap.values()
+    ]  # Split actions into components for future prefix matching
     _print_actions(keymap)
 
     crafter.constants.items["health"]["max"] = config.health
@@ -75,6 +80,43 @@ def main(config: DictConfig):
     was_done = False
     print("Diamonds exist:", env_recorded._world.count("diamond"))
 
+    # Get action prefixes list from user input (either stdin or file) and parse it into actual actions
+    def parse_action_prefix(prefix):
+        """Parse action prefix and return matching action."""
+        prefix = prefix.strip()
+        matching_actions = [
+            action for action in keymap.values()
+            if all(comp.startswith(p) for p, comp in zip(prefix.split("_"), action.split("_")))
+            and len(prefix.split("_")) == len(action.split("_"))
+        ]
+        if len(matching_actions) == 1:
+            return matching_actions[0]
+        else:
+            # print(f"Warning: prefix '{prefix}' matches {len(matching_actions)} actions, skipping")
+            # return None
+            raise ValueError(f"Prefix '{prefix}' is ambiguous and matches multiple actions: {matching_actions}")
+
+    actions_input_source = config.actions_input_source
+    if actions_input_source == "stdin":
+        print(
+            "Enter actions (separated by comma, can be prefix of one of the components of an action, e.g., 'move_left' to 'le')."
+            "Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end input."
+        )
+        action_prefixes = input("Actions: ")
+        actions = [a for a in [parse_action_prefix(p) for p in action_prefixes.split(",")] if a is not None]
+    elif actions_input_source == "file":
+        if not config.actions_input_file_path:
+            raise ValueError(
+                "actions_input_file_path must be provided when actions_input_source is 'file'"
+            )
+        with open(config.actions_input_file_path, "r") as f:
+            actions = [a for a in [parse_action_prefix(line.strip()) for line in f if line.strip()] if a is not None]
+    else:
+        raise ValueError(
+            f"Invalid actions_input_source: {actions_input_source}, should be 'stdin' or 'file'"
+        )
+
+    # Main loop
     pygame.init()
     screen = pygame.display.set_mode(config.window)
     clock = pygame.time.Clock()
