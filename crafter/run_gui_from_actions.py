@@ -118,6 +118,8 @@ def main(config: DictConfig):
         pygame.K_d: "move_right",
         pygame.K_w: "move_up",
         pygame.K_s: "move_down",
+        pygame.K_e: "rotate_clockwise",
+        pygame.K_q: "rotate_counterclockwise",
         pygame.K_SPACE: "do",
         pygame.K_TAB: "sleep",
         pygame.K_r: "place_stone",

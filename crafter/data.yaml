@@ -4,6 +4,8 @@ actions:
   - move_right
   - move_up
   - move_down
+  - rotate_clockwise
+  - rotate_counterclockwise
   - do
   - sleep
   - place_stone

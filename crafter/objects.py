@@ -110,6 +110,10 @@ class Player(Object):
       pass
     elif action.startswith('move_'):
       self._move(action[len('move_'):])
+    elif action == 'rotate_clockwise':
+      self._rotate(clockwise=True)
+    elif action == 'rotate_counterclockwise':
+      self._rotate(clockwise=False)
     elif action == 'do' and obj:
       self._do_object(obj)
     elif action == 'do':
@@ -180,6 +184,23 @@ class Player(Object):
     self.move(self.facing)
     if self.world[self.pos][0] == 'lava':
       self.health = 0
+
+  def _rotate(self, clockwise):
+    rotations = {
+        True: {
+            (-1, 0): (0, -1),
+            (0, -1): (+1, 0),
+            (+1, 0): (0, +1),
+            (0, +1): (-1, 0),
+        },
+        False: {
+            (-1, 0): (0, +1),
+            (0, +1): (+1, 0),
+            (+1, 0): (0, -1),
+            (0, -1): (-1, 0),
+        },
+    }
+    self.facing = rotations[clockwise][tuple(self.facing)]
 
   def _do_object(self, obj):
     damage = max([
