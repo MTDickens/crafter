@@ -17,6 +17,100 @@ def _print_actions(keymap):
         print(f"  {pygame.key.name(key)}: {action}")
 
 
+def get_actions_from_user(keymap: dict[int, str], config: DictConfig) -> list[str]:
+    """Get action prefixes list from user input (either stdin or file) and parse it into actual actions."""
+    action_parts_by_name = {action: action.split("_") for action in keymap.values()}
+
+    def matching_actions(
+        prefix_parts: list[str], skip_first_component: bool = False
+    ) -> list[str]:
+        """Return actions whose components match the given per-component prefixes."""
+        matches = []
+        for action, action_parts in action_parts_by_name.items():
+            candidate_parts = action_parts[1:] if skip_first_component else action_parts
+            if len(prefix_parts) != len(candidate_parts):
+                continue
+            if all(
+                part.startswith(prefix)
+                for prefix, part in zip(prefix_parts, candidate_parts)
+            ):
+                matches.append(action)
+        return matches
+
+    def parse_action_prefix(prefix: str) -> str:
+        """Resolve a user-provided action token to one concrete action name.
+
+        Matching is intentionally tiered to keep shorthand convenient without
+        introducing surprising collisions:
+
+        1. Exact action-name match, e.g. ``do`` -> ``do``.
+        2. Per-component prefix match with the same number of components,
+            e.g. ``mo_ri`` -> ``move_right``.
+        3. Per-component prefix match after dropping the first action component,
+            which allows movement shorthand such as ``up`` -> ``move_up`` and
+            ``down`` -> ``move_down``.
+
+        A token is accepted only if exactly one action matches at the highest
+        applicable tier. Otherwise a ``ValueError`` is raised for either
+        ambiguity or no match.
+        """
+        prefix = prefix.strip()
+        if not prefix:
+            raise ValueError("Action prefix cannot be empty.")
+
+        if prefix in action_parts_by_name:
+            return prefix
+
+        prefix_parts = prefix.split("_")
+        matches = matching_actions(prefix_parts)
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"Prefix '{prefix}' is ambiguous and matches multiple actions: {matches}"
+            )
+
+        shorthand_matches = matching_actions(prefix_parts, skip_first_component=True)
+        if len(shorthand_matches) == 1:
+            return shorthand_matches[0]
+        if len(shorthand_matches) > 1:
+            raise ValueError(
+                f"Prefix '{prefix}' is ambiguous and matches multiple actions: {shorthand_matches}"
+            )
+        raise ValueError(f"Prefix '{prefix}' did not match any action.")
+
+    actions_input_source = config.actions_input_source
+    if actions_input_source == "stdin":
+        print(
+            "Enter actions (separated by comma, can be prefix of one of the components of an action, e.g., 'move_left' to 'le')."
+            "Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end input."
+        )
+        action_prefixes = input("Actions: ")
+        actions = [
+            a
+            for a in [parse_action_prefix(p) for p in action_prefixes.split(",")]
+            if a is not None
+        ]
+    elif actions_input_source == "file":
+        if not config.actions_input_file_path:
+            raise ValueError(
+                "actions_input_file_path must be provided when actions_input_source is 'file'"
+            )
+        with open(config.actions_input_file_path, "r") as f:
+            actions = [
+                a
+                for a in [
+                    parse_action_prefix(line.strip()) for line in f if line.strip()
+                ]
+                if a is not None
+            ]
+    else:
+        raise ValueError(
+            f"Invalid actions_input_source: {actions_input_source}, should be 'stdin' or 'file'"
+        )
+    return actions
+
+
 @hydra.main(version_base=None, config_path="conf", config_name="run_gui_from_actions")
 def main(config: DictConfig):
     keymap = {
@@ -37,9 +131,6 @@ def main(config: DictConfig):
         pygame.K_5: "make_stone_sword",
         pygame.K_6: "make_iron_sword",
     }
-    action_components_list = [
-        action.split("_") for action in keymap.values()
-    ]  # Split actions into components for future prefix matching
     _print_actions(keymap)
 
     crafter.constants.items["health"]["max"] = config.health
@@ -80,64 +171,14 @@ def main(config: DictConfig):
     was_done = False
     print("Diamonds exist:", env_recorded._world.count("diamond"))
 
-    # Get action prefixes list from user input (either stdin or file) and parse it into actual actions
-    def parse_action_prefix(prefix):
-        """Parse action prefix and return matching action."""
-        prefix = prefix.strip()
-        matching_actions = [
-            action
-            for action in keymap.values()
-            if all(
-                comp.startswith(p)
-                for p, comp in zip(prefix.split("_"), action.split("_"))
-            )
-            and len(prefix.split("_")) == len(action.split("_"))
-        ]
-        if len(matching_actions) == 1:
-            return matching_actions[0]
-        else:
-            # print(f"Warning: prefix '{prefix}' matches {len(matching_actions)} actions, skipping")
-            # return None
-            raise ValueError(
-                f"Prefix '{prefix}' is ambiguous and matches multiple actions: {matching_actions}"
-            )
-
-    actions_input_source = config.actions_input_source
-    if actions_input_source == "stdin":
-        print(
-            "Enter actions (separated by comma, can be prefix of one of the components of an action, e.g., 'move_left' to 'le')."
-            "Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end input."
-        )
-        action_prefixes = input("Actions: ")
-        actions = [
-            a
-            for a in [parse_action_prefix(p) for p in action_prefixes.split(",")]
-            if a is not None
-        ]
-    elif actions_input_source == "file":
-        if not config.actions_input_file_path:
-            raise ValueError(
-                "actions_input_file_path must be provided when actions_input_source is 'file'"
-            )
-        with open(config.actions_input_file_path, "r") as f:
-            actions = [
-                a
-                for a in [
-                    parse_action_prefix(line.strip()) for line in f if line.strip()
-                ]
-                if a is not None
-            ]
-    else:
-        raise ValueError(
-            f"Invalid actions_input_source: {actions_input_source}, should be 'stdin' or 'file'"
-        )
-
     # Main loop
     pygame.init()
     screen = pygame.display.set_mode(config.window)
     clock = pygame.time.Clock()
     running = True
+
     action_idx = 0
+
     while running:
         # Rendering.
         image = env_recorded.render(size)
@@ -153,18 +194,27 @@ def main(config: DictConfig):
         # Keyboard input.
         action = None
         pygame.event.pump()
+
+        # Get actions from user at the beginning of the episode after rendering the initial state
+        # so that user can see the initial state before providing actions.
+        if action_idx == 0:
+            actions: list[str] = get_actions_from_user(keymap, config)
+
         for event in pygame.event.get():
-            if action_idx < len(actions):
-                # Prioritize scripted actions from user input over keyboard input
-                action = actions[action_idx]
-                action_idx += 1
-            elif event.type == pygame.QUIT:
+            if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 running = False
-            elif event.type == pygame.KEYDOWN and event.key in keymap:
+            elif (
+                action_idx >= len(actions)
+                and event.type == pygame.KEYDOWN
+                and event.key in keymap
+            ):
                 action = keymap[event.key]
-        if action is None:
+        if action_idx < len(actions):
+            action = actions[action_idx]
+            action_idx += 1
+        elif action is None:
             pressed = pygame.key.get_pressed()
             for key, action in keymap.items():
                 if pressed[key]:
