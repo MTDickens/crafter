@@ -85,8 +85,12 @@ def main(config: DictConfig):
         """Parse action prefix and return matching action."""
         prefix = prefix.strip()
         matching_actions = [
-            action for action in keymap.values()
-            if all(comp.startswith(p) for p, comp in zip(prefix.split("_"), action.split("_")))
+            action
+            for action in keymap.values()
+            if all(
+                comp.startswith(p)
+                for p, comp in zip(prefix.split("_"), action.split("_"))
+            )
             and len(prefix.split("_")) == len(action.split("_"))
         ]
         if len(matching_actions) == 1:
@@ -94,7 +98,9 @@ def main(config: DictConfig):
         else:
             # print(f"Warning: prefix '{prefix}' matches {len(matching_actions)} actions, skipping")
             # return None
-            raise ValueError(f"Prefix '{prefix}' is ambiguous and matches multiple actions: {matching_actions}")
+            raise ValueError(
+                f"Prefix '{prefix}' is ambiguous and matches multiple actions: {matching_actions}"
+            )
 
     actions_input_source = config.actions_input_source
     if actions_input_source == "stdin":
@@ -103,14 +109,24 @@ def main(config: DictConfig):
             "Press Ctrl+D (Unix) or Ctrl+Z (Windows) to end input."
         )
         action_prefixes = input("Actions: ")
-        actions = [a for a in [parse_action_prefix(p) for p in action_prefixes.split(",")] if a is not None]
+        actions = [
+            a
+            for a in [parse_action_prefix(p) for p in action_prefixes.split(",")]
+            if a is not None
+        ]
     elif actions_input_source == "file":
         if not config.actions_input_file_path:
             raise ValueError(
                 "actions_input_file_path must be provided when actions_input_source is 'file'"
             )
         with open(config.actions_input_file_path, "r") as f:
-            actions = [a for a in [parse_action_prefix(line.strip()) for line in f if line.strip()] if a is not None]
+            actions = [
+                a
+                for a in [
+                    parse_action_prefix(line.strip()) for line in f if line.strip()
+                ]
+                if a is not None
+            ]
     else:
         raise ValueError(
             f"Invalid actions_input_source: {actions_input_source}, should be 'stdin' or 'file'"
@@ -121,6 +137,7 @@ def main(config: DictConfig):
     screen = pygame.display.set_mode(config.window)
     clock = pygame.time.Clock()
     running = True
+    action_idx = 0
     while running:
         # Rendering.
         image = env_recorded.render(size)
@@ -137,7 +154,11 @@ def main(config: DictConfig):
         action = None
         pygame.event.pump()
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            if action_idx < len(actions):
+                # Prioritize scripted actions from user input over keyboard input
+                action = actions[action_idx]
+                action_idx += 1
+            elif event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 running = False
