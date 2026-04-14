@@ -414,11 +414,7 @@ class TaskMotionPlanner:
         self._advance_completed_tasks(env)
 
         if self.task_index >= len(self.tasks):
-            if not self._has_reported_success:
-                self._has_reported_success = True
-                print(
-                    f"[planner] all tasks finished, total additional peeks = {self.known_world.peek_count}"
-                )
+            self._report_finished_once()
             action = "noop"
             self._set_expected_state(env, action)
             return action
@@ -434,6 +430,22 @@ class TaskMotionPlanner:
         action = self._queued_actions.pop(0)
         self._set_expected_state(env, action)
         return action
+
+    def is_finished(self, env) -> bool:
+        """Return whether the planner considers all configured tasks complete.
+
+        This method updates planner-internal knowledge and task progress from
+        the current environment observation before checking completion, so the
+        result reflects the planner's latest internal state rather than a stale
+        cached task index.
+        """
+        self._refresh_local_state(env)
+        self._validate_expected_state(env)
+        self._advance_completed_tasks(env)
+        if self.task_index >= len(self.tasks):
+            self._report_finished_once()
+            return True
+        return False
 
     def _refresh_local_state(self, env) -> None:
         """Reveal the player tile and its immediate neighbors for free."""
@@ -487,6 +499,15 @@ class TaskMotionPlanner:
             )
             self.task_index += 1
             self._queued_actions = []
+
+    def _report_finished_once(self) -> None:
+        """Emit the one-time completion log message for the entire task list."""
+        if self._has_reported_success:
+            return
+        self._has_reported_success = True
+        print(
+            f"[planner] all tasks finished, total additional peeks = {self.known_world.peek_count}"
+        )
 
     def _task_is_complete(self, env, task_index: int) -> bool:
         """Return whether the task at ``task_index`` is already complete.

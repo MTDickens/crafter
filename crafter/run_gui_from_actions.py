@@ -160,6 +160,7 @@ def main(config: DictConfig):
             "planner.known_world_frames_dir can only be used when "
             "actions_input_source is 'planner'"
         )
+    planner_exit_on_completion = bool(config.planner.exit_on_completion)
 
     size = list(config.size)
     size[0] = size[0] or config.window[0]
@@ -212,6 +213,15 @@ def main(config: DictConfig):
     )
 
     while running:
+        if (
+            actions_loaded
+            and planner is not None
+            and planner_exit_on_completion
+            and planner.is_finished(env_recorded)
+        ):
+            print("[planner] exiting run because all configured tasks are complete")
+            break
+
         # Rendering.
         image = env_recorded.render(size)
         if size != config.window:
@@ -233,6 +243,9 @@ def main(config: DictConfig):
             if config.actions_input_source == "planner":
                 planner = TaskMotionPlanner(env_recorded, config.planner)
                 actions = []
+                if planner_exit_on_completion and planner.is_finished(env_recorded):
+                    print("[planner] exiting run because all configured tasks are complete")
+                    break
                 if known_world_root is not None:
                     known_world_exporter = KnownWorldFrameExporter(
                         known_world_root,
