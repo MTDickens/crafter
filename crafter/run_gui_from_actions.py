@@ -205,7 +205,7 @@ def main(config: DictConfig):
     actions_loaded = False
     planner: TaskMotionPlanner | None = None
     known_world_exporter: KnownWorldFrameExporter | None = None
-    known_world_episode_index = 0
+    known_world_episode_index = config.planner.known_world_episode_index
     known_world_root = (
         pathlib.Path(hydra.utils.to_absolute_path(known_world_frames_dir))
         if known_world_frames_dir
