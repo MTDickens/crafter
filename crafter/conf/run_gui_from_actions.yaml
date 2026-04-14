@@ -23,8 +23,30 @@ runtime:
   daylight_cycle: false
 
 # Input
-actions_input_source: stdin # Can be either stdin or file
+actions_input_source: stdin # Can be stdin, file, or planner
 actions_input_file_path: null
+
+planner:
+  initial_knowledge: global # Can be global or local
+  unknown_motion_penalty: 100.0
+  frontier_reveal_budget: 64
+  allow_lava: false
+  debug: false
+  task_order:
+    - collect_wood
+    - place_table
+    - make_wood_pickaxe
+    - make_wood_sword
+    - collect_stone
+    - place_stone
+    - make_stone_pickaxe
+    - make_stone_sword
+    - place_furnace
+    - collect_coal
+    - collect_iron
+    - make_iron_pickaxe
+    - make_iron_sword
+    - collect_diamond
 
 hydra:
   run:

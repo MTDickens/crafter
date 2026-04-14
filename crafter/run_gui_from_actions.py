@@ -9,6 +9,7 @@ from omegaconf import DictConfig
 from PIL import Image
 
 import crafter
+from crafter.task_motion_planner import TaskMotionPlanner
 
 
 def _print_actions(keymap):
@@ -179,6 +180,7 @@ def main(config: DictConfig):
     actions: list[str] = []
     action_idx = 0
     actions_loaded = False
+    planner: TaskMotionPlanner | None = None
 
     while running:
         # Rendering.
@@ -199,7 +201,11 @@ def main(config: DictConfig):
         # Get actions from user at the beginning of the episode after rendering the initial state
         # so that user can see the initial state before providing actions.
         if not actions_loaded:
-            actions = get_actions_from_user(keymap, config)
+            if config.actions_input_source == "planner":
+                planner = TaskMotionPlanner(env_recorded, config.planner)
+                actions = []
+            else:
+                actions = get_actions_from_user(keymap, config)
             actions_loaded = True
 
         for event in pygame.event.get():
@@ -216,6 +222,8 @@ def main(config: DictConfig):
         if action_idx < len(actions):
             action = actions[action_idx]
             action_idx += 1
+        elif planner is not None:
+            action = planner.next_action(env_recorded)
         elif action is None:
             pressed = pygame.key.get_pressed()
             for key, action in keymap.items():
