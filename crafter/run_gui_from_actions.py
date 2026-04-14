@@ -1,5 +1,6 @@
 """Run the Crafter environment with a series of actions provided by the user."""
 
+import datetime
 import pathlib
 
 import hydra
@@ -19,11 +20,10 @@ class KnownWorldFrameExporter:
         self,
         directory: pathlib.Path,
         textures,
-        episode_index: int,
         mode: str,
     ):
-        self._episode_dir = directory / f"episode_{episode_index:04d}"
-        self._episode_dir.mkdir(exist_ok=True, parents=True)
+        self._directory = directory
+        self._directory.mkdir(exist_ok=True, parents=True)
         self._textures = textures
         self._frame_index = 0
         self._mode = mode
@@ -31,7 +31,7 @@ class KnownWorldFrameExporter:
     def save_step_frame(self, planner: TaskMotionPlanner, env) -> None:
         """Save a zero-padded per-step frame."""
         image = render_known_world_image(planner, env, self._textures)
-        filename = self._episode_dir / f"frame_{self._frame_index:06d}.png"
+        filename = self._directory / f"frame_{self._frame_index:06d}.png"
         Image.fromarray(image).save(filename)
         self._frame_index += 1
 
@@ -44,8 +44,18 @@ class KnownWorldFrameExporter:
             return
         task_name, frame_index = event
         image = render_known_world_image(planner, env, self._textures)
-        filename = self._episode_dir / f"frame_{frame_index:06d}-{task_name}.png"
+        filename = self._directory / f"frame_{frame_index:06d}-{task_name}.png"
         Image.fromarray(image).save(filename)
+
+
+def _make_known_world_episode_dir(root: pathlib.Path, run_id: str, episode_index: int) -> pathlib.Path:
+    """Return the output directory for one GUI-run planner episode."""
+    return root / run_id / "worker_0000" / f"episode_{episode_index:06d}"
+
+
+def _make_known_world_run_id() -> str:
+    """Return a timestamp-based run identifier for known-world exports."""
+    return datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
 
 
 def _print_actions(keymap):
@@ -230,7 +240,8 @@ def main(config: DictConfig):
     actions_loaded = False
     planner: TaskMotionPlanner | None = None
     known_world_exporter: KnownWorldFrameExporter | None = None
-    known_world_episode_index = config.planner.known_world_episode_index
+    known_world_episode_index = 0
+    known_world_run_id = _make_known_world_run_id() if known_world_frames_dir else None
     known_world_root = (
         pathlib.Path(hydra.utils.to_absolute_path(known_world_frames_dir))
         if known_world_frames_dir
@@ -273,9 +284,12 @@ def main(config: DictConfig):
                     break
                 if known_world_root is not None:
                     known_world_exporter = KnownWorldFrameExporter(
-                        known_world_root,
+                        _make_known_world_episode_dir(
+                            known_world_root,
+                            known_world_run_id,
+                            known_world_episode_index,
+                        ),
                         env_recorded._textures,
-                        known_world_episode_index,
                         known_world_frames_mode,
                     )
                     known_world_episode_index += 1
