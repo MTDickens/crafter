@@ -376,6 +376,7 @@ class TaskMotionPlanner:
         self._expected_pos: Position | None = None
         self._expected_facing: Facing | None = None
         self._has_reported_success = False
+        self._pending_known_world_task_render: tuple[str, int] | None = None
 
         if config.initial_knowledge == "global":
             self.known_world.reveal_all(env._world, charge_cost=False)
@@ -426,6 +427,7 @@ class TaskMotionPlanner:
             self._queued_actions = self._synthesize_actions(env, task)
             if not self._queued_actions:
                 raise RuntimeError(f"Planner failed to synthesize actions for {task.name}")
+            self._pending_known_world_task_render = (task.name, int(env._step))
 
         action = self._queued_actions.pop(0)
         self._set_expected_state(env, action)
@@ -446,6 +448,12 @@ class TaskMotionPlanner:
             self._report_finished_once()
             return True
         return False
+
+    def consume_known_world_task_render(self) -> tuple[str, int] | None:
+        """Return and clear the pending task-boundary known-world render event."""
+        event = self._pending_known_world_task_render
+        self._pending_known_world_task_render = None
+        return event
 
     def _refresh_local_state(self, env) -> None:
         """Reveal the player tile and its immediate neighbors for free."""

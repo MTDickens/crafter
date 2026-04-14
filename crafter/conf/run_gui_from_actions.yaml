@@ -33,6 +33,7 @@ planner:
   allow_lava: false
   exit_on_completion: true # If true, stop the GUI loop as soon as the planner believes all tasks are done
   known_world_frames_dir: known_world_frames # If not null, rendered known world frames will be stored here
+  known_world_frames_mode: task # Can be step or task
   known_world_episode_index: 1
   debug: false
   task_order:

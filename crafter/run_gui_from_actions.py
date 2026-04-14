@@ -15,17 +15,37 @@ from crafter.task_motion_planner import TaskMotionPlanner, render_known_world_im
 class KnownWorldFrameExporter:
     """Save planner known-world renders as a PNG frame sequence."""
 
-    def __init__(self, directory: pathlib.Path, textures, episode_index: int):
+    def __init__(
+        self,
+        directory: pathlib.Path,
+        textures,
+        episode_index: int,
+        mode: str,
+    ):
         self._episode_dir = directory / f"episode_{episode_index:04d}"
         self._episode_dir.mkdir(exist_ok=True, parents=True)
         self._textures = textures
         self._frame_index = 0
+        self._mode = mode
 
-    def save_frame(self, planner: TaskMotionPlanner, env) -> None:
+    def save_step_frame(self, planner: TaskMotionPlanner, env) -> None:
+        """Save a zero-padded per-step frame."""
         image = render_known_world_image(planner, env, self._textures)
         filename = self._episode_dir / f"frame_{self._frame_index:06d}.png"
         Image.fromarray(image).save(filename)
         self._frame_index += 1
+
+    def save_pending_task_frame(self, planner: TaskMotionPlanner, env) -> None:
+        """Save one frame when a new task starts executing in task mode."""
+        if self._mode != "task":
+            return
+        event = planner.consume_known_world_task_render()
+        if event is None:
+            return
+        task_name, frame_index = event
+        image = render_known_world_image(planner, env, self._textures)
+        filename = self._episode_dir / f"frame_{frame_index:06d}-{task_name}.png"
+        Image.fromarray(image).save(filename)
 
 
 def _print_actions(keymap):
@@ -155,10 +175,15 @@ def main(config: DictConfig):
         config.sapling_from_grass_probability
     )
     known_world_frames_dir = config.planner.known_world_frames_dir
+    known_world_frames_mode = str(config.planner.known_world_frames_mode)
     if known_world_frames_dir and config.actions_input_source != "planner":
         raise ValueError(
             "planner.known_world_frames_dir can only be used when "
             "actions_input_source is 'planner'"
+        )
+    if known_world_frames_mode not in {"step", "task"}:
+        raise ValueError(
+            "planner.known_world_frames_mode must be either 'step' or 'task'"
         )
     planner_exit_on_completion = bool(config.planner.exit_on_completion)
 
@@ -251,9 +276,11 @@ def main(config: DictConfig):
                         known_world_root,
                         env_recorded._textures,
                         known_world_episode_index,
+                        known_world_frames_mode,
                     )
                     known_world_episode_index += 1
-                    known_world_exporter.save_frame(planner, env_recorded)
+                    if known_world_frames_mode == "step":
+                        known_world_exporter.save_step_frame(planner, env_recorded)
             else:
                 actions = get_actions_from_user(keymap, config)
             actions_loaded = True
@@ -274,6 +301,8 @@ def main(config: DictConfig):
             action_idx += 1
         elif planner is not None:
             action = planner.next_action(env_recorded)
+            if known_world_exporter is not None:
+                known_world_exporter.save_pending_task_frame(planner, env_recorded)
         elif action is None:
             pressed = pygame.key.get_pressed()
             for key, action in keymap.items():
@@ -287,9 +316,13 @@ def main(config: DictConfig):
 
         # Environment step.
         _, reward, done, _ = env_recorded.step(env_recorded.action_names.index(action))
-        if planner is not None and known_world_exporter is not None:
+        if (
+            planner is not None
+            and known_world_exporter is not None
+            and known_world_frames_mode == "step"
+        ):
             planner._refresh_local_state(env_recorded)
-            known_world_exporter.save_frame(planner, env_recorded)
+            known_world_exporter.save_step_frame(planner, env_recorded)
         duration += 1
 
         # Achievements.
