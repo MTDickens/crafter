@@ -23,6 +23,8 @@ import heapq
 import itertools
 from typing import Iterable
 
+import numpy as np
+
 from . import constants
 
 Position = tuple[int, int]
@@ -1039,3 +1041,58 @@ def _object_name(obj) -> str | None:
     if name == "Player":
         return None
     return name.lower()
+
+
+def render_known_world_image(
+    planner: TaskMotionPlanner,
+    env,
+    textures,
+    tile_size: int = 16,
+    background_color: tuple[int, int, int] = (127, 127, 127),
+) -> np.ndarray:
+    """Render the planner's currently known world as a full-map RGB image.
+
+    Unknown tiles are left as a flat background color. Known materials are
+    rendered using existing Crafter textures, known non-player objects are
+    alpha-blended on top, and the current player texture is drawn last.
+
+    Args:
+        planner: Planner whose ``KnownWorld`` should be visualized.
+        env: Crafter environment providing the current player state.
+        textures: Crafter texture atlas, typically ``env._textures``.
+        tile_size: Pixel size for each world tile in the exported image.
+        background_color: RGB fill color for unrevealed tiles.
+
+    Returns:
+        ``(height, width, 3)`` uint8 image suitable for saving as a PNG.
+    """
+    known_world = planner.known_world
+    unit = np.array([tile_size, tile_size], dtype=int)
+    canvas = np.zeros(
+        (known_world.area[0] * tile_size, known_world.area[1] * tile_size, 3),
+        dtype=np.uint8,
+    )
+    canvas[:] = np.array(background_color, dtype=np.uint8)
+
+    def draw_texture(texture_name: str, pos: Position, *, alpha: bool = False) -> None:
+        texture = textures.get(texture_name, unit)
+        top_left = np.array(pos) * unit
+        x, y = int(top_left[0]), int(top_left[1])
+        width, height = texture.shape[:2]
+        if texture.shape[-1] == 4 and alpha:
+            alpha_channel = texture[..., 3:].astype(np.float32) / 255.0
+            rgb = texture[..., :3].astype(np.float32) / 255.0
+            current = canvas[x : x + width, y : y + height].astype(np.float32) / 255.0
+            blended = alpha_channel * rgb + (1.0 - alpha_channel) * current
+            canvas[x : x + width, y : y + height] = (255.0 * blended).astype(np.uint8)
+            return
+        canvas[x : x + width, y : y + height] = texture[..., :3]
+
+    for pos in sorted(known_world._materials):
+        draw_texture(known_world.material(pos), pos)
+        obj_name = known_world.object_name(pos)
+        if obj_name is not None:
+            draw_texture(obj_name, pos, alpha=True)
+
+    draw_texture(env._player.texture, _to_position(env._player.pos), alpha=True)
+    return canvas.transpose((1, 0, 2))

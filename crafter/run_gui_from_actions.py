@@ -9,7 +9,23 @@ from omegaconf import DictConfig
 from PIL import Image
 
 import crafter
-from crafter.task_motion_planner import TaskMotionPlanner
+from crafter.task_motion_planner import TaskMotionPlanner, render_known_world_image
+
+
+class KnownWorldFrameExporter:
+    """Save planner known-world renders as a PNG frame sequence."""
+
+    def __init__(self, directory: pathlib.Path, textures, episode_index: int):
+        self._episode_dir = directory / f"episode_{episode_index:04d}"
+        self._episode_dir.mkdir(exist_ok=True, parents=True)
+        self._textures = textures
+        self._frame_index = 0
+
+    def save_frame(self, planner: TaskMotionPlanner, env) -> None:
+        image = render_known_world_image(planner, env, self._textures)
+        filename = self._episode_dir / f"frame_{self._frame_index:06d}.png"
+        Image.fromarray(image).save(filename)
+        self._frame_index += 1
 
 
 def _print_actions(keymap):
@@ -138,6 +154,12 @@ def main(config: DictConfig):
     crafter.constants.collect["grass"]["probability"] = (
         config.sapling_from_grass_probability
     )
+    known_world_frames_dir = config.planner.known_world_frames_dir
+    if known_world_frames_dir and config.actions_input_source != "planner":
+        raise ValueError(
+            "planner.known_world_frames_dir can only be used when "
+            "actions_input_source is 'planner'"
+        )
 
     size = list(config.size)
     size[0] = size[0] or config.window[0]
@@ -181,6 +203,13 @@ def main(config: DictConfig):
     action_idx = 0
     actions_loaded = False
     planner: TaskMotionPlanner | None = None
+    known_world_exporter: KnownWorldFrameExporter | None = None
+    known_world_episode_index = 0
+    known_world_root = (
+        pathlib.Path(hydra.utils.to_absolute_path(known_world_frames_dir))
+        if known_world_frames_dir
+        else None
+    )
 
     while running:
         # Rendering.
@@ -204,6 +233,14 @@ def main(config: DictConfig):
             if config.actions_input_source == "planner":
                 planner = TaskMotionPlanner(env_recorded, config.planner)
                 actions = []
+                if known_world_root is not None:
+                    known_world_exporter = KnownWorldFrameExporter(
+                        known_world_root,
+                        env_recorded._textures,
+                        known_world_episode_index,
+                    )
+                    known_world_episode_index += 1
+                    known_world_exporter.save_frame(planner, env_recorded)
             else:
                 actions = get_actions_from_user(keymap, config)
             actions_loaded = True
@@ -237,6 +274,9 @@ def main(config: DictConfig):
 
         # Environment step.
         _, reward, done, _ = env_recorded.step(env_recorded.action_names.index(action))
+        if planner is not None and known_world_exporter is not None:
+            planner._refresh_local_state(env_recorded)
+            known_world_exporter.save_frame(planner, env_recorded)
         duration += 1
 
         # Achievements.
@@ -273,6 +313,8 @@ def main(config: DictConfig):
                 actions = []
                 action_idx = 0
                 actions_loaded = False
+                planner = None
+                known_world_exporter = None
             if config.death == "continue":
                 pass
 
