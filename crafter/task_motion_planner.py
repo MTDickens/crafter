@@ -191,6 +191,35 @@ class KnownWorld:
             return True
         return False
 
+    def _standable_material(self, material: str) -> bool:
+        """Return whether ``material`` itself is safe to stand on."""
+        if material in constants.walkable:
+            return True
+        if self.allow_lava and material == "lava":
+            return True
+        return False
+
+    def can_excavate_known(self, pos: Position, inventory: dict[str, int]) -> bool:
+        """Return whether a known tile can be cleared into a standable tile now."""
+        if not self.is_known(pos):
+            return False
+        if self.object_name(pos) is not None:
+            return False
+        info = constants.collect.get(self.material(pos))
+        if info is None:
+            return False
+        if not self._standable_material(info["leaves"]):
+            return False
+        return requirements_met(info["require"], inventory)
+
+    def can_traverse_known(self, pos: Position, inventory: dict[str, int]) -> bool:
+        """Return whether the planner can occupy ``pos`` now or after one dig."""
+        if not self.is_known(pos):
+            return False
+        if self.can_stand_known(pos):
+            return True
+        return self.can_excavate_known(pos, inventory)
+
     def optimistic_can_stand(self, pos: Position) -> bool:
         """Return a permissive standability check for planning under uncertainty.
 
@@ -204,12 +233,13 @@ class KnownWorld:
             return True
         return self.can_stand_known(pos)
 
-    def known_distance_map(self, start: Position) -> dict[Position, int]:
+    def known_distance_map(self, start: Position, inventory: dict[str, int]) -> dict[Position, int]:
         """Compute BFS distances inside the revealed traversable region.
 
-        Only already known and standable tiles are expanded. This makes the
-        result useful for ranking candidate stands, frontier tiles, and
-        workspace locations without speculating through unknown space.
+        Only already known tiles that are either standable right now or
+        traversable after one excavation are expanded. This makes the result
+        useful for ranking candidate stands, frontier tiles, and workspace
+        locations without speculating through unknown space.
 
         Args:
             start: Revealed starting tile for the search.
@@ -234,7 +264,7 @@ class KnownWorld:
                     continue
                 if not self.is_known(neighbor):
                     continue
-                if not self.can_stand_known(neighbor):
+                if not self.can_traverse_known(neighbor, inventory):
                     continue
                 distances[neighbor] = distances[pos] + 1
                 queue.append(neighbor)
@@ -255,19 +285,22 @@ class LazyMotionPlanner:
         self.known_world = known_world
         self.unknown_penalty = float(unknown_penalty)
 
-    def estimate_path(self, start: Position, goals: Iterable[Position]) -> list[Position] | None:
+    def estimate_path(
+        self, start: Position, goals: Iterable[Position], inventory: dict[str, int]
+    ) -> list[Position] | None:
         """Return the current best optimistic path without revealing new tiles."""
-        return self._optimistic_shortest_path(start, goals)
+        return self._optimistic_shortest_path(start, goals, inventory)
 
     def plan_validated_path(
-        self, world, start: Position, goals: Iterable[Position]
+        self, world, start: Position, goals: Iterable[Position], inventory: dict[str, int]
     ) -> list[Position] | None:
         """Plan a path and validate every unknown step against the real world.
 
         The method repeatedly computes an optimistic shortest path, reveals
         unknown tiles along that path as needed, and restarts planning if one
-        of those tiles turns out to be blocked. The returned path therefore
-        contains only known standable tiles by the time the method succeeds.
+        of those tiles turns out to be neither standable nor diggable with the
+        current inventory. The returned path therefore contains only known
+        traversable tiles by the time the method succeeds.
 
         Args:
             world: Crafter world object used to reveal unknown tiles.
@@ -282,27 +315,27 @@ class LazyMotionPlanner:
         if not goal_set:
             return None
         while True:
-            path = self._optimistic_shortest_path(start, goal_set)
+            path = self._optimistic_shortest_path(start, goal_set, inventory)
             if path is None:
                 return None
             blocked = False
             for pos in path[1:]:
                 if not self.known_world.is_known(pos):
                     self.known_world.sync(world, pos, charge_cost=True)
-                if not self.known_world.can_stand_known(pos):
+                if not self.known_world.can_traverse_known(pos, inventory):
                     blocked = True
                     break
             if not blocked:
                 return path
 
     def _optimistic_shortest_path(
-        self, start: Position, goals: Iterable[Position]
+        self, start: Position, goals: Iterable[Position], inventory: dict[str, int]
     ) -> list[Position] | None:
         """Run Dijkstra search with unknown-tile penalties.
 
         Unknown tiles are traversable at cost ``1 + unknown_penalty``.
-        Revealed standable tiles cost ``1``. Revealed blocked tiles are
-        excluded entirely.
+        Revealed standable tiles and revealed diggable tiles both cost ``1``.
+        Revealed blocked tiles are excluded entirely.
         """
         goal_set = frozenset(goals)
         if not goal_set:
@@ -320,7 +353,7 @@ class LazyMotionPlanner:
             if pos in goal_set:
                 return _reconstruct_path(parents, pos)
             for neighbor in self.known_world.neighbors(pos):
-                step_cost = self._step_cost(neighbor)
+                step_cost = self._step_cost(neighbor, inventory)
                 if step_cost is None:
                     continue
                 new_cost = cost + step_cost
@@ -332,11 +365,11 @@ class LazyMotionPlanner:
                 tie_breaker += 1
         return None
 
-    def _step_cost(self, pos: Position) -> float | None:
+    def _step_cost(self, pos: Position, inventory: dict[str, int]) -> float | None:
         """Return movement cost for stepping onto ``pos`` under optimistic planning."""
         if not self.known_world.is_known(pos):
             return 1.0 + self.unknown_penalty
-        if not self.known_world.can_stand_known(pos):
+        if not self.known_world.can_traverse_known(pos, inventory):
             return None
         return 1.0
 
@@ -614,7 +647,9 @@ class TaskMotionPlanner:
         if not goal_to_targets:
             return None
         start = _to_position(env._player.pos)
-        path = self.motion_planner.plan_validated_path(env._world, start, goal_to_targets)
+        path = self.motion_planner.plan_validated_path(
+            env._world, start, goal_to_targets, env._player.inventory
+        )
         if path is None:
             return None
         stand = path[-1]
@@ -622,6 +657,7 @@ class TaskMotionPlanner:
         return self._assemble_interaction_plan(
             path=path,
             current_facing=_to_facing(env._player.facing),
+            inventory=env._player.inventory,
             stand=stand,
             target=target,
             action_name="do",
@@ -631,13 +667,14 @@ class TaskMotionPlanner:
         """Plan a collection interaction against one specific target tile."""
         start = _to_position(env._player.pos)
         path = self.motion_planner.plan_validated_path(
-            env._world, start, self.known_world.neighbors(target)
+            env._world, start, self.known_world.neighbors(target), env._player.inventory
         )
         if path is None:
             raise RuntimeError(f"No path to collect from tile {target}")
         return self._assemble_interaction_plan(
             path=path,
             current_facing=_to_facing(env._player.facing),
+            inventory=env._player.inventory,
             stand=path[-1],
             target=target,
             action_name="do",
@@ -669,7 +706,7 @@ class TaskMotionPlanner:
         revealed region.
         """
         current_pos = _to_position(env._player.pos)
-        distance_map = self.known_world.known_distance_map(current_pos)
+        distance_map = self.known_world.known_distance_map(current_pos, env._player.inventory)
         known_targets = self.known_world.positions_with_material(target_material)
         best_score = None
         best_frontier = None
@@ -702,7 +739,7 @@ class TaskMotionPlanner:
         prefers tiles that border more unrevealed space.
         """
         current_pos = _to_position(env._player.pos)
-        distance_map = self.known_world.known_distance_map(current_pos)
+        distance_map = self.known_world.known_distance_map(current_pos, env._player.inventory)
         known_targets = self.known_world.positions_with_material(target_material)
         allowed_auxiliary_materials = self._allowed_auxiliary_materials(task)
         best_score = None
@@ -774,7 +811,7 @@ class TaskMotionPlanner:
         or lava over consuming generic buildable terrain.
         """
         current_pos = _to_position(env._player.pos)
-        distance_map = self.known_world.known_distance_map(current_pos)
+        distance_map = self.known_world.known_distance_map(current_pos, env._player.inventory)
         reserved = set()
         if self.workspace is not None:
             reserved.add(self.workspace.stand)
@@ -794,7 +831,9 @@ class TaskMotionPlanner:
                 if not stand_options:
                     continue
                 best_stand = min(stand_options, key=lambda stand: (distance_map[stand], stand))
-                degree = self._known_standable_neighbor_count(target, reserved | {best_stand})
+                degree = self._known_standable_neighbor_count(
+                    target, reserved | {best_stand}, env._player.inventory
+                )
                 terrain_bias = 0 if target_material in ("water", "lava") else 5
                 score = (
                     distance_map[best_stand] + terrain_bias,
@@ -813,12 +852,15 @@ class TaskMotionPlanner:
     ) -> list[str]:
         """Plan movement and facing adjustment for one placement action."""
         start = _to_position(env._player.pos)
-        path = self.motion_planner.plan_validated_path(env._world, start, [stand])
+        path = self.motion_planner.plan_validated_path(
+            env._world, start, [stand], env._player.inventory
+        )
         if path is None:
             raise RuntimeError(f"No path to placement stand {stand} for {action_name}")
         return self._assemble_interaction_plan(
             path=path,
             current_facing=_to_facing(env._player.facing),
+            inventory=env._player.inventory,
             stand=stand,
             target=target,
             action_name=action_name,
@@ -846,10 +888,14 @@ class TaskMotionPlanner:
         if missing:
             raise RuntimeError(f"Workspace is missing required utilities for {task.name}: {missing}")
         start = _to_position(env._player.pos)
-        path = self.motion_planner.plan_validated_path(env._world, start, [workspace.stand])
+        path = self.motion_planner.plan_validated_path(
+            env._world, start, [workspace.stand], env._player.inventory
+        )
         if path is None:
             raise RuntimeError(f"No path to workspace stand {workspace.stand} for {task.name}")
-        actions = path_to_actions(path)
+        actions, _ = path_to_actions_with_digging(
+            path, _to_facing(env._player.facing), self.known_world, env._player.inventory
+        )
         actions.append(task.action_name)
         return actions
 
@@ -863,7 +909,7 @@ class TaskMotionPlanner:
         if self.workspace is not None:
             return self.workspace
         current_pos = _to_position(env._player.pos)
-        distance_map = self.known_world.known_distance_map(current_pos)
+        distance_map = self.known_world.known_distance_map(current_pos, env._player.inventory)
         best_score = None
         best_workspace = None
         for stand, distance in distance_map.items():
@@ -882,14 +928,20 @@ class TaskMotionPlanner:
                 for neighbor in self.known_world.neighbors(stand):
                     if neighbor in (table_pos, furnace_pos):
                         continue
-                    if self.known_world.is_known(neighbor) and self.known_world.can_stand_known(neighbor):
+                    if self.known_world.is_known(neighbor) and self.known_world.can_traverse_known(
+                        neighbor, env._player.inventory
+                    ):
                         remaining_access += 1
                     elif not self.known_world.is_known(neighbor):
                         remaining_access += 1
                 if remaining_access < 1:
                     continue
-                slot_penalty = self._known_standable_neighbor_count(table_pos, {stand})
-                slot_penalty += self._known_standable_neighbor_count(furnace_pos, {stand})
+                slot_penalty = self._known_standable_neighbor_count(
+                    table_pos, {stand}, env._player.inventory
+                )
+                slot_penalty += self._known_standable_neighbor_count(
+                    furnace_pos, {stand}, env._player.inventory
+                )
                 score = (distance, slot_penalty, -remaining_access, stand, table_pos, furnace_pos)
                 if best_score is None or score < best_score:
                     best_score = score
@@ -905,14 +957,16 @@ class TaskMotionPlanner:
         return self.workspace
 
     def _known_standable_neighbor_count(
-        self, pos: Position, excluded: set[Position]
+        self, pos: Position, excluded: set[Position], inventory: dict[str, int]
     ) -> int:
-        """Count known standable neighbors of ``pos`` excluding reserved tiles."""
+        """Count known traversable neighbors of ``pos`` excluding reserved tiles."""
         count = 0
         for neighbor in self.known_world.neighbors(pos):
             if neighbor in excluded:
                 continue
-            if self.known_world.is_known(neighbor) and self.known_world.can_stand_known(neighbor):
+            if self.known_world.is_known(neighbor) and self.known_world.can_traverse_known(
+                neighbor, inventory
+            ):
                 count += 1
         return count
 
@@ -920,13 +974,15 @@ class TaskMotionPlanner:
         self,
         path: list[Position],
         current_facing: Facing,
+        inventory: dict[str, int],
         stand: Position,
         target: Position,
         action_name: str,
     ) -> list[str]:
         """Convert movement plus final facing adjustment into action strings."""
-        actions = path_to_actions(path)
-        facing_after_path = current_facing if len(path) == 1 else direction_between(path[-2], path[-1])
+        actions, facing_after_path = path_to_actions_with_digging(
+            path, current_facing, self.known_world, inventory
+        )
         desired_facing = direction_between(stand, target)
         actions.extend(rotation_actions(facing_after_path, desired_facing))
         actions.append(action_name)
@@ -1006,6 +1062,33 @@ def path_to_actions(path: list[Position]) -> list[str]:
     for lhs, rhs in zip(path, path[1:]):
         actions.append(MOVE_ACTION_BY_FACING[direction_between(lhs, rhs)])
     return actions
+
+
+def path_to_actions_with_digging(
+    path: list[Position],
+    current_facing: Facing,
+    known_world: KnownWorld,
+    inventory: dict[str, int],
+) -> tuple[list[str], Facing]:
+    """Translate a path into actions, inserting excavation where needed.
+
+    Known diggable tiles are entered by rotating toward the next tile, issuing
+    ``do`` to clear it, and then emitting the move action into the cleared
+    tile.
+    """
+    actions: list[str] = []
+    facing = current_facing
+    for lhs, rhs in zip(path, path[1:]):
+        direction = direction_between(lhs, rhs)
+        if known_world.is_known(rhs) and not known_world.can_stand_known(rhs):
+            if not known_world.can_excavate_known(rhs, inventory):
+                raise RuntimeError(f"Path step requires non-diggable tile: {rhs}")
+            actions.extend(rotation_actions(facing, direction))
+            facing = direction
+            actions.append("do")
+        actions.append(MOVE_ACTION_BY_FACING[direction])
+        facing = direction
+    return actions, facing
 
 
 def rotation_actions(current_facing: Facing, desired_facing: Facing) -> list[str]:
