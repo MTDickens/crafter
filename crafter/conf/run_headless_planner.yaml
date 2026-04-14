@@ -1,0 +1,56 @@
+# Execution
+episodes: 10
+workers: 1
+base_seed: null
+run_id: null
+headless_record: null
+
+# Game
+area: [64, 64]
+view: [70, 70]
+size: [512, 512]
+length: 10000
+health: 9
+sapling_from_grass_probability: 0.0
+
+runtime:
+  spawn_objects: false
+  spawn_random_objects: true
+  move_objects: false
+  move_random_objects: true
+  hunger_decreases: false
+  thirst_decreases: false
+  energy_decreases: false
+  daylight_cycle: false
+
+planner:
+  initial_knowledge: local # Can be global or local
+  unknown_motion_penalty: 100.0
+  frontier_reveal_budget: 1000000
+  allow_lava: false
+  exit_on_completion: true
+  known_world_frames_dir: known_world_frames
+  known_world_frames_mode: task # Can be step or task
+  debug: false
+  task_order:
+    - collect_wood
+    - place_table
+    - make_wood_pickaxe
+    - make_wood_sword
+    - collect_stone
+    - place_stone
+    - make_stone_pickaxe
+    - make_stone_sword
+    - place_furnace
+    - collect_coal
+    - collect_iron
+    - make_iron_pickaxe
+    - make_iron_sword
+    - collect_diamond
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false
