@@ -22,6 +22,15 @@ runtime:
   energy_decreases: false
   daylight_cycle: false
 
+map_generation:
+  max_attempts: 10
+  material_minimums:
+    tree: 8
+    stone: 7
+    coal: 2
+    iron: 2
+    diamond: 1
+
 # Input
 actions_input_source: planner # Can be stdin, file, or planner
 actions_input_file_path: null

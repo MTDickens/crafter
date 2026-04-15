@@ -10,6 +10,7 @@ from omegaconf import DictConfig
 from PIL import Image
 
 import crafter
+from crafter.map_generation import reset_env_with_material_minimums
 from crafter.task_motion_planner import TaskMotionPlanner, render_known_world_image
 
 
@@ -56,6 +57,18 @@ def _make_known_world_episode_dir(root: pathlib.Path, run_id: str, episode_index
 def _make_known_world_run_id() -> str:
     """Return a timestamp-based run identifier for known-world exports."""
     return datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+
+
+def _reset_env_with_map_constraints(env, config: DictConfig) -> None:
+    map_generation_config = config.get("map_generation", {})
+    _, counts, attempts = reset_env_with_material_minimums(
+        env,
+        material_minimums=map_generation_config.get("material_minimums"),
+        max_attempts=map_generation_config.get("max_attempts", 1),
+        log_fn=print,
+    )
+    if counts:
+        print(f"[map-gen] accepted counts after {attempts} attempt(s): {counts}")
 
 
 def _print_actions(keymap):
@@ -222,7 +235,7 @@ def main(config: DictConfig):
         daylight_cycle=config.runtime.daylight_cycle,
     )
     env_recorded = crafter.Recorder(env, record)
-    env_recorded.reset()
+    _reset_env_with_map_constraints(env_recorded, config)
     achievements = set()
     duration = 0
     return_ = 0
@@ -365,7 +378,7 @@ def main(config: DictConfig):
                 running = False
             if config.death == "reset":
                 print("\nStarting a new episode.")
-                env_recorded.reset()
+                _reset_env_with_map_constraints(env_recorded, config)
                 achievements = set()
                 was_done = False
                 duration = 0

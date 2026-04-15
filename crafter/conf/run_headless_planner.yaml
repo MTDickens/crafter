@@ -23,6 +23,15 @@ runtime:
   energy_decreases: false
   daylight_cycle: false
 
+map_generation:
+  max_attempts: 10
+  material_minimums:
+    tree: 8
+    stone: 7
+    coal: 2
+    iron: 2
+    diamond: 1
+
 planner:
   initial_knowledge: local # Can be global or local
   unknown_motion_penalty: 100.0

@@ -13,6 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 
 import crafter
+from crafter.map_generation import reset_env_with_material_minimums
 from crafter.task_motion_planner import TaskMotionPlanner, render_known_world_image
 
 
@@ -118,6 +119,27 @@ def _make_episode_dir(root: str | None, run_id: str, worker_index: int, episode_
     )
 
 
+def _reset_env_with_map_constraints(
+    env,
+    config: dict[str, Any],
+    worker_index: int,
+    episode_index: int,
+) -> None:
+    map_generation_config = config.get("map_generation", {})
+    _, counts, attempts = reset_env_with_material_minimums(
+        env,
+        material_minimums=map_generation_config.get("material_minimums"),
+        max_attempts=map_generation_config.get("max_attempts", 1),
+        log_fn=lambda message: _log(worker_index, episode_index, message),
+    )
+    if counts:
+        _log(
+            worker_index,
+            episode_index,
+            f"[map-gen] accepted counts after {attempts} attempt(s): {counts}",
+        )
+
+
 def run_one_episode(
     config: dict[str, Any],
     run_id: str,
@@ -137,7 +159,7 @@ def run_one_episode(
     )
 
     env_recorded = _make_env(config, seed, record_dir)
-    env_recorded.reset()
+    _reset_env_with_map_constraints(env_recorded, config, worker_index, episode_index)
     _log(worker_index, episode_index, f"Diamonds exist: {env_recorded._world.count('diamond')}")
 
     planner = TaskMotionPlanner(env_recorded, OmegaConf.create(planner_config))
