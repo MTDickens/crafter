@@ -640,6 +640,26 @@ class TaskMotionPlanner:
             return None
         return self._plan_collect_from_tiles(env, target_tiles)
 
+    def _has_reachable_collect_target(self, env, material: str) -> bool:
+        """Return whether some known target tile is collectible right now.
+
+        A target is considered reachable when at least one tile adjacent to a
+        known tile with ``material`` lies inside the current dig-aware reachable
+        region from the player's position. This mirrors the planner's notion of
+        "there exists an interaction stand we can already get to" without
+        performing any additional reveals.
+        """
+        target_tiles = self.known_world.positions_with_material(material)
+        if not target_tiles:
+            return False
+        start = _to_position(env._player.pos)
+        reachable_stands = self.known_world.known_distance_map(start, env._player.inventory)
+        for target in target_tiles:
+            for stand in self.known_world.neighbors(target):
+                if stand in reachable_stands:
+                    return True
+        return False
+
     def _plan_collect_from_tiles(
         self, env, target_tiles: Iterable[Position]
     ) -> list[str] | None:
@@ -692,15 +712,15 @@ class TaskMotionPlanner:
     def _reveal_frontier_toward(self, env, target_material: str) -> None:
         """Spend reveal budget on frontier tiles that may uncover a target.
 
-        Revealing stops early if there is no frontier left or if one of the
-        newly revealed tiles already contains the requested material.
+        Revealing stops early if there is no frontier left or if a known target
+        material now has at least one reachable interaction stand.
         """
         for _ in range(self.frontier_reveal_budget):
             frontier = self._choose_reveal_target(env, target_material)
             if frontier is None:
                 return
             self.known_world.sync(env._world, frontier, charge_cost=True)
-            if self.known_world.material(frontier) == target_material:
+            if self._has_reachable_collect_target(env, target_material):
                 return
 
     def _choose_reveal_target(self, env, target_material: str) -> Position | None:
