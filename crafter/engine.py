@@ -115,11 +115,15 @@ class World:
 
   def nearby(self, pos, distance):
     (x, y), d = pos, distance
+    xmin = max(0, x - d)
+    xmax = min(self.area[0], x + d + 1)
+    ymin = max(0, y - d)
+    ymax = min(self.area[1], y + d + 1)
     ids = set(self._mat_map[
-        x - d: x + d + 1, y - d: y + d + 1].flatten().tolist())
+        xmin: xmax, ymin: ymax].flatten().tolist())
     materials = tuple(self._mat_names[x] for x in ids)
     indices = self._obj_map[
-        x - d: x + d + 1, y - d: y + d + 1].flatten().tolist()
+        xmin: xmax, ymin: ymax].flatten().tolist()
     objs = {self._objects[i] for i in indices if i > 0}
     return materials, objs
 
