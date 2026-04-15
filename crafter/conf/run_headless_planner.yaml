@@ -26,6 +26,9 @@ runtime:
 planner:
   initial_knowledge: local # Can be global or local
   unknown_motion_penalty: 100.0
+  frontier_reveal_mode: frontier_random # Can be gradual, frontier_random, or global_random
+  # global_random isn't well implemented. Don't use it for now.
+
   frontier_reveal_budget: 1000000
   allow_lava: false
   exit_on_completion: true

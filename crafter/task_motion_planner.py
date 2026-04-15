@@ -399,6 +399,7 @@ class TaskMotionPlanner:
         self.tasks = tuple(parse_task_name(name) for name in config.task_order)
         self.debug = bool(config.debug)
         self.frontier_reveal_budget = int(config.frontier_reveal_budget)
+        self.frontier_reveal_mode = str(config.frontier_reveal_mode)
         self.known_world = KnownWorld(env._world.area, allow_lava=bool(config.allow_lava))
         self.motion_planner = LazyMotionPlanner(
             self.known_world, unknown_penalty=float(config.unknown_motion_penalty)
@@ -418,6 +419,14 @@ class TaskMotionPlanner:
         else:
             raise ValueError(
                 f"Unsupported planner.initial_knowledge: {config.initial_knowledge}"
+            )
+        if self.frontier_reveal_mode not in {
+            "gradual",
+            "frontier_random",
+            "global_random",
+        }:
+            raise ValueError(
+                f"Unsupported planner.frontier_reveal_mode: {self.frontier_reveal_mode}"
             )
         self._refresh_local_state(env)
         print(
@@ -687,12 +696,34 @@ class TaskMotionPlanner:
         newly revealed tiles already contains the requested material.
         """
         for _ in range(self.frontier_reveal_budget):
-            frontier = self._choose_frontier_to_reveal(env, target_material)
+            frontier = self._choose_reveal_target(env, target_material)
             if frontier is None:
                 return
             self.known_world.sync(env._world, frontier, charge_cost=True)
             if self.known_world.material(frontier) == target_material:
                 return
+
+    def _choose_reveal_target(self, env, target_material: str) -> Position | None:
+        """Choose one tile to reveal according to the configured reveal policy."""
+        if self.frontier_reveal_mode == "gradual":
+            return self._choose_frontier_to_reveal(env, target_material)
+        if self.frontier_reveal_mode == "frontier_random":
+            return self._choose_random_frontier_to_reveal(env)
+        if self.frontier_reveal_mode == "global_random":
+            return self._choose_random_unknown_tile(env)
+        raise RuntimeError(f"Unsupported frontier reveal mode: {self.frontier_reveal_mode}")
+
+    def _reachable_frontier_tiles(self, env) -> list[Position]:
+        """Return unknown tiles adjacent to currently reachable known tiles."""
+        current_pos = _to_position(env._player.pos)
+        distance_map = self.known_world.known_distance_map(current_pos, env._player.inventory)
+        frontier_tiles = set()
+        for stand in distance_map:
+            for frontier in self.known_world.neighbors(stand):
+                if self.known_world.is_known(frontier):
+                    continue
+                frontier_tiles.add(frontier)
+        return sorted(frontier_tiles)
 
     def _choose_frontier_to_reveal(
         self, env, target_material: str
@@ -727,6 +758,27 @@ class TaskMotionPlanner:
                 best_score = score
                 best_frontier = frontier
         return best_frontier
+
+    def _choose_random_frontier_to_reveal(self, env) -> Position | None:
+        """Choose a uniformly random reachable frontier tile."""
+        frontier_tiles = self._reachable_frontier_tiles(env)
+        if not frontier_tiles:
+            return None
+        index = env._world.random.randint(0, len(frontier_tiles))
+        return frontier_tiles[index]
+
+    def _choose_random_unknown_tile(self, env) -> Position | None:
+        """Choose a uniformly random unknown tile anywhere on the map."""
+        unknown_tiles = [
+            (x, y)
+            for x in range(self.known_world.area[0])
+            for y in range(self.known_world.area[1])
+            if not self.known_world.is_known((x, y))
+        ]
+        if not unknown_tiles:
+            return None
+        index = env._world.random.randint(0, len(unknown_tiles))
+        return unknown_tiles[index]
 
     def _choose_auxiliary_excavation_tile(
         self, env, task: TaskSpec, target_material: str
