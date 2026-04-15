@@ -1,0 +1,43 @@
+# Output
+output_path: crafter/patterns/default_connected_frontier_cross_library.json
+
+# Data generation
+train_maps: 128
+train_base_seed: 0
+eval_maps: 32
+eval_base_seed: 100000
+training_mask_seed: 123
+evaluation_mask_seed: 456
+
+# Pattern-learning hyperparameters
+device: cpu
+prior_scale: 0.01
+training_policy: connected_frontier # connected_frontier or all_tiles
+masks_per_map: 8
+observed_fraction_min: 0.05
+observed_fraction_max: 0.35
+
+evaluation_policy: connected_frontier # connected_frontier or all_tiles
+evaluation_masks_per_map: 8
+
+# Crafter world generation
+area: [64, 64]
+view: [9, 9]
+size: [64, 64]
+
+runtime:
+  spawn_objects: false
+  spawn_random_objects: false
+  move_objects: false
+  move_random_objects: false
+  hunger_decreases: false
+  thirst_decreases: false
+  energy_decreases: false
+  daylight_cycle: false
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false

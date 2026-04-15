@@ -21,11 +21,14 @@ import collections
 import dataclasses
 import heapq
 import itertools
+import math
+import pathlib
 from typing import Iterable
 
 import numpy as np
 
-from . import constants
+from crafter import constants
+from crafter.pattern_library import PatternLibrary
 
 Position = tuple[int, int]
 Facing = tuple[int, int]
@@ -159,6 +162,10 @@ class KnownWorld:
     def object_name(self, pos: Position) -> str | None:
         """Return the observed non-player object name at a known tile."""
         return self._objects[pos]
+
+    def known_materials(self) -> dict[Position, str]:
+        """Return a copy of all currently observed terrain materials."""
+        return dict(self._materials)
 
     def positions_with_material(self, material: str) -> list[Position]:
         """Return all known positions currently observed as ``material``."""
@@ -404,6 +411,9 @@ class TaskMotionPlanner:
         self.motion_planner = LazyMotionPlanner(
             self.known_world, unknown_penalty=float(config.unknown_motion_penalty)
         )
+        self.pattern_library: PatternLibrary | None = None
+        self.pattern_commit_threshold: float | None = None
+        self.pattern_commit_max_passes = 1
         self.workspace: WorkspacePlan | None = None
         self.task_index = 0
         self._queued_actions: list[str] = []
@@ -424,10 +434,27 @@ class TaskMotionPlanner:
             "gradual",
             "frontier_random",
             "global_random",
+            "pattern_inferred_prob_guided_gradual",
         }:
             raise ValueError(
                 f"Unsupported planner.frontier_reveal_mode: {self.frontier_reveal_mode}"
             )
+        if self.frontier_reveal_mode == "pattern_inferred_prob_guided_gradual":
+            pattern_config = config.pattern_inference
+            if pattern_config.library_path is None:
+                raise ValueError(
+                    "planner.pattern_inference.library_path must be provided when "
+                    "frontier_reveal_mode is 'pattern_inferred_prob_guided_gradual'"
+                )
+            self.pattern_library = PatternLibrary.load(
+                pathlib.Path(str(pattern_config.library_path)),
+                device=str(pattern_config.get("device", "cpu")),
+            )
+            if pattern_config.commit_threshold is None:
+                self.pattern_commit_threshold = None
+            else:
+                self.pattern_commit_threshold = float(pattern_config.commit_threshold)
+            self.pattern_commit_max_passes = int(pattern_config.commit_max_passes)
         self._refresh_local_state(env)
         print(
             f"[planner] loaded {len(self.tasks)} tasks, initial known tiles = {len(self.known_world._materials)}"
@@ -731,6 +758,8 @@ class TaskMotionPlanner:
             return self._choose_random_frontier_to_reveal(env)
         if self.frontier_reveal_mode == "global_random":
             return self._choose_random_unknown_tile(env)
+        if self.frontier_reveal_mode == "pattern_inferred_prob_guided_gradual":
+            return self._choose_pattern_guided_frontier_to_reveal(env, target_material)
         raise RuntimeError(f"Unsupported frontier reveal mode: {self.frontier_reveal_mode}")
 
     def _reachable_frontier_tiles(self, env) -> list[Position]:
@@ -786,6 +815,51 @@ class TaskMotionPlanner:
             return None
         index = env._world.random.randint(0, len(frontier_tiles))
         return frontier_tiles[index]
+
+    def _choose_pattern_guided_frontier_to_reveal(
+        self, env, target_material: str
+    ) -> Position | None:
+        """Rank reachable frontier tiles by inferred target-material probability."""
+        if self.pattern_library is None:
+            raise RuntimeError(
+                "Pattern library is not loaded for pattern-guided frontier reveal"
+            )
+        current_pos = _to_position(env._player.pos)
+        distance_map = self.known_world.known_distance_map(current_pos, env._player.inventory)
+        frontier_best_distance: dict[Position, int] = {}
+        for stand, distance in distance_map.items():
+            for frontier in self.known_world.neighbors(stand):
+                if self.known_world.is_known(frontier):
+                    continue
+                if frontier not in frontier_best_distance or distance < frontier_best_distance[frontier]:
+                    frontier_best_distance[frontier] = distance
+        if not frontier_best_distance:
+            return None
+        candidate_positions = sorted(frontier_best_distance)
+        predictions = self.pattern_library.infer_unknown_materials(
+            area=self.known_world.area,
+            known_materials=self.known_world.known_materials(),
+            candidate_positions=candidate_positions,
+            commit_threshold=self.pattern_commit_threshold,
+            commit_max_passes=self.pattern_commit_max_passes,
+        )
+        known_targets = self.known_world.positions_with_material(target_material)
+        best_score = None
+        best_frontier = None
+        for frontier in candidate_positions:
+            posterior = predictions[frontier].probabilities
+            distance = frontier_best_distance[frontier]
+            target_probability = posterior[target_material]
+            entropy = _distribution_entropy(posterior)
+            if known_targets:
+                hint = min(manhattan(frontier, target) for target in known_targets)
+                score = (-target_probability, hint, entropy, distance, frontier)
+            else:
+                score = (-target_probability, entropy, distance, frontier)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_frontier = frontier
+        return best_frontier
 
     def _choose_random_unknown_tile(self, env) -> Position | None:
         """Choose a uniformly random unknown tile anywhere on the map."""
@@ -1194,6 +1268,16 @@ def direction_between(lhs: Position, rhs: Position) -> Facing:
 def manhattan(lhs: Position, rhs: Position) -> int:
     """Return Manhattan distance between two positions."""
     return abs(lhs[0] - rhs[0]) + abs(lhs[1] - rhs[1])
+
+
+def _distribution_entropy(distribution: dict[str, float]) -> float:
+    """Return the Shannon entropy of a normalized categorical distribution."""
+    entropy = 0.0
+    for probability in distribution.values():
+        if probability <= 0.0:
+            continue
+        entropy -= probability * math.log(probability)
+    return entropy
 
 
 def _reconstruct_path(parents: dict[Position, Position], goal: Position) -> list[Position]:

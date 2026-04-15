@@ -10,10 +10,10 @@ setuptools.setup(
     long_description=pathlib.Path('README.md').read_text(),
     long_description_content_type='text/markdown',
     packages=['crafter'],
-    package_data={'crafter': ['data.yaml', 'assets/*']},
+    package_data={'crafter': ['data.yaml', 'assets/*', 'conf/*.yaml', 'patterns/*.json']},
     entry_points={'console_scripts': ['crafter=crafter.run_gui:main']},
     install_requires=[
-        'numpy', 'imageio', 'pillow', 'opensimplex', 'ruamel.yaml',
+        'numpy', 'imageio', 'pillow', 'opensimplex', 'ruamel.yaml', 'hydra-core', 'torch>=2.11.0',
     ],
     extras_require={'gui': ['pygame']},
     classifiers=[

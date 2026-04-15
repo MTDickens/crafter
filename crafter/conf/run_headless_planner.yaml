@@ -26,8 +26,14 @@ runtime:
 planner:
   initial_knowledge: local # Can be global or local
   unknown_motion_penalty: 100.0
-  frontier_reveal_mode: frontier_random # Can be gradual, frontier_random, or global_random
+  frontier_reveal_mode: frontier_random # Can be gradual, frontier_random, global_random, or pattern_inferred_prob_guided_gradual
   # global_random isn't well implemented. Don't use it for now.
+
+  pattern_inference:
+    library_path: crafter/patterns/my_library.json
+    device: cpu
+    commit_threshold: null # Optional recursive soft-commit threshold in (0, 1]
+    commit_max_passes: 1
 
   frontier_reveal_budget: 1000000
   allow_lava: false
