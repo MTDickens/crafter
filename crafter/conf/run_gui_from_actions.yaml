@@ -29,7 +29,9 @@ actions_input_file_path: null
 planner:
   initial_knowledge: local # Can be global or local
   unknown_motion_penalty: 100.0
-  frontier_reveal_mode: gradual # Can be gradual, frontier_random, or global_random
+  frontier_reveal_mode: frontier_random # Can be gradual, frontier_random, or global_random
+  # global_random isn't well implemented. Don't use it for now.
+
   frontier_reveal_budget: 1000000 # Use infinite budget for now
   allow_lava: false
   exit_on_completion: true # If true, stop the GUI loop as soon as the planner believes all tasks are done
