@@ -21,6 +21,24 @@ runtime:
   energy_decreases: false
   daylight_cycle: false
 
+# Task and motion planner
+planner:
+  task_order:
+    - collect_wood
+    - place_table
+    - make_wood_pickaxe
+    - make_wood_sword
+    - collect_stone
+    - place_stone
+    - make_stone_pickaxe
+    - make_stone_sword
+    - place_furnace
+    - collect_coal
+    - collect_iron
+    - make_iron_pickaxe
+    - make_iron_sword
+    - collect_diamond
+
 hydra:
   run:
     dir: .
