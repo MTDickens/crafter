@@ -11,7 +11,7 @@ class SimpleWorld:
   The world is almost static and only contains static blocks.
   """
 
-  # TODO: Implement this "SimpleWorld" as the docstring.
+  # TODO: Implement this "SimpleWorld" as the docstring says.
   
   def __copy__(self):
     # TODO
@@ -157,4 +157,6 @@ class KnownWorld:
     self._world: SimpleWorld = copy(self._initial_world)
     self._mask: np.ndarray = np.zeros(self._world.area, dtype=bool)
     
-    
+  # TODO: The known world should be initialized with the start known and only the start known. All others are unknown.
+  # It should work well with TaskAndMotionPlanner. You should think of which function this known_world should provide.
+  # Make sure this is concisely implemented.
