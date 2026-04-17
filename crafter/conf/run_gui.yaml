@@ -2,7 +2,7 @@ defaults:
   - tamp_planner: vanilla
   - _self_
 
-seed: null
+seed: 2026
 headless: true
 episodes: 30
 workers: 30

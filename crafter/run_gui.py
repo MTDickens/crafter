@@ -188,7 +188,10 @@ def _build_planner_trace(config: DictConfig, env_recorded):
       inventory=env_recorded._player.inventory.copy(),
       facing=tuple(env_recorded._player.facing),
   )
-  planner = TaskAndMotionPlanner(config.planner.task_order)
+  planner = TaskAndMotionPlanner(
+      config.planner.task_order,
+      random=np.random.RandomState(env_recorded._world.random.randint(0, 2 ** 31 - 1)),
+  )
   planner_trace = planner.plan_with_trace(known_world)
   print(f'Planner ({planner_name}) produced {len(planner_trace.actions)} actions.')
   for name, value in _selected_planner_metrics(config, planner_trace).items():
