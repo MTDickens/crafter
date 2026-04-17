@@ -402,6 +402,23 @@ planner 会：
 
 这在 `KnownWorld.find_or_reserve_craft_cluster()` 中实现。
 
+这里还有一个现在已经明确收紧的约束：
+
+- 一旦某个 4x4 craft cluster 被 reserve，下游的其他 1x1 放置任务就不能再占用这个 4x4 区域里的任何格子。
+
+注意，不只是不能占用：
+
+- `table`
+- `furnace`
+- `crafting_stand`
+
+这几个命名格，
+
+而是整个 4x4 区域都视为“保留营地空间”。
+
+这样做的原因是，后续 planner 会反复要求这个 reserved cluster 始终保持 layout-compatible。  
+如果像 `place_stone` 这样的 1x1 任务把石头放进这个 4x4 区域中的其他 walkable 格子，那么这个 cluster 之后就不再兼容，会直接触发 fail-fast。
+
 ## 9. collect 是怎么做的
 
 `_collect_until(item, required)` 的行为可以概括成：
@@ -448,6 +465,26 @@ planner 会：
 3. 找到后走过去并面向它；
 4. 执行 `place_*`；
 5. 更新 `_world` 和 inventory。
+
+这里有一个容易忽略、但现在已经明确实现的约束：
+
+- 如果 craft cluster 已经 reserve，那么 `place_1x1` 不允许选择这个 4x4 区域中的任何格子。
+
+这个约束同时作用在两个层面：
+
+1. 已知目标选择
+2. future reveal 候选选择
+
+也就是说：
+
+- `find_placeable_1x1()` 不会返回 reserved 4x4 内的格子；
+- `placeable_frontier_candidates_1x1()` 也不会把 reserved 4x4 内的 unknown 格子作为 1x1 放置 reveal 候选。
+
+除此之外，`apply_place()` 里还有一层额外的 fail-fast 断言：
+
+- 除了 `table` 和 `furnace` 这两个本来就属于 cluster 的命名放置外，其他 `place_*` 一律不允许写进 reserved 4x4。
+
+这一点不是“优化”，而是为了防止 reserved craft cluster 后续失效。
 
 ### 10.3 `make`
 
@@ -922,7 +959,9 @@ planner:
 - `headless = false` 但 `workers > 1`；
 - `headless = true` 但 `planner.enabled = false`；
 - `planner.plan_only = true` 但还开启了依赖环境执行期的渲染或 record；
-- `planner.render_known_world = step`。
+- `planner.render_known_world = step`；
+- 某个已经 reserve 的 craft cluster 由于后续放置而失去兼容性；
+- 某个非 `table/furnace` 的 `place_*` 试图写入 reserved craft cluster。
 
 这样做的目的是：
 
@@ -971,6 +1010,30 @@ planner:
 并不支持每一步都导出 known-world 图像。
 
 所以 `render_known_world = step` 现在仍然明确是未实现。
+
+### 19.7 reserved craft cluster 是硬约束，不会自动“修复”
+
+当前实现一旦 reserve 了某个 4x4 craft cluster，就把它当作长期不变的全局布局约束。
+
+这意味着：
+
+- planner 不会在后面“发现营地被破坏了以后重新选一个新的 cluster”；
+- 也不会自动做局部修补；
+- 一旦这个 reserve 被破坏，就直接报错。
+
+这是一种故意的 fail-fast 设计。
+
+之前的一个真实 bug 就来自这里：
+
+- `place_stone` 的 1x1 选点最初只避开了 `table/furnace/crafting_stand` 这些命名格；
+- 但没有避开整个 reserved 4x4；
+- 结果石头可能被放进营地的其他格子里；
+- 后续再次检查 `craft_cluster_candidates(fully_known=True)` 时，就会报
+  `Reserved craft cluster is no longer compatible`。
+
+现在这个 bug 已经修正，规则也明确了：
+
+- 整个 reserved 4x4 都不能被普通 1x1 放置占用。
 
 ## 20. 后续自然的扩展方向
 

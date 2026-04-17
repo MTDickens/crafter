@@ -720,7 +720,7 @@ class KnownWorld:
         continue
       if not self.is_walkable_material(material):
         continue
-      if any(tuple(self.named_position(name)) == pos for name in self._CRAFT_CLUSTER_OFFSETS if self._craft_cluster_anchor):
+      if self._is_reserved_craft_cluster_cell(pos):
         continue
       try:
         self.find_adjacent_reachable(pos)
@@ -735,6 +735,11 @@ class KnownWorld:
     for dx in range(self._CRAFT_CLUSTER_SHAPE[0]):
       for dy in range(self._CRAFT_CLUSTER_SHAPE[1]):
         yield (ax + dx, ay + dy)
+
+  def _is_reserved_craft_cluster_cell(self, pos) -> bool:
+    if self._craft_cluster_anchor is None:
+      return False
+    return tuple(pos) in set(self._craft_anchor_cells(self._craft_cluster_anchor))
 
   def _craft_anchor_compatible(self, anchor, fully_known: bool):
     for pos in self._craft_anchor_cells(anchor):
@@ -849,6 +854,9 @@ class KnownWorld:
     pos = tuple(pos)
     material = self.material_at(pos)
     info = constants.place[name]
+    if name not in ('table', 'furnace'):
+      assert not self._is_reserved_craft_cluster_cell(pos), (
+          f'Cannot place {name} inside the reserved craft cluster: {pos}')
     assert material in info['where'], f'Cannot place {name} on {material} at {pos}'
     assert all(self.inventory.get(item, 0) >= amount for item, amount in info['uses'].items()), (
         f'Not enough inventory to place {name}: need {info["uses"]}')
@@ -898,7 +906,11 @@ class KnownWorld:
     where = set(constants.place[place_name]['where'])
     return [
         pos for pos in frontier
-        if self.initial_material_at(pos) in where and self.is_walkable_material(self.initial_material_at(pos))
+        if (
+            self.initial_material_at(pos) in where
+            and self.is_walkable_material(self.initial_material_at(pos))
+            and not self._is_reserved_craft_cluster_cell(pos)
+        )
     ]
 
   # TODO preserved from the original file:
