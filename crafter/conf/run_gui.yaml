@@ -1,3 +1,7 @@
+defaults:
+  - tamp_planner: vanilla
+  - _self_
+
 seed: null
 area: [64, 64]
 view: [70, 70]
@@ -23,6 +27,11 @@ runtime:
 
 # Task and motion planner
 planner:
+  enabled: true
+  name: vanilla
+  exit_on_finish: true
+  result_logging:
+    - reveal_count
   task_order:
     - collect_wood
     - place_table

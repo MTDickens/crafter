@@ -68,7 +68,7 @@ class TaskAndMotionPlanner:
     self.random = random or np.random.RandomState()
     self._known_world: KnownWorld | None = None
 
-  def plan(self, known_world: KnownWorld):
+  def plan(self, known_world: KnownWorld) -> list[str]:
     """Plan and simulate the whole task sequence.
 
     Parameters
@@ -95,7 +95,7 @@ class TaskAndMotionPlanner:
       Instead, we will just need to reveal grids until "pre-material" + "inventory" >= required.
     """
     self._known_world = known_world
-    actions = []
+    actions: list[str] = []
     for task in self.task_list:
       micro_tasks = task.get_micro_tasks(self._known_world, self._known_world.inventory)
       actions.extend(self._reveal_until_ready(task, micro_tasks))
@@ -312,20 +312,20 @@ class TaskAndMotionPlanner:
     path = self.plan_path_to_any([goal_pos])
     return self._execute_position_path(path)
 
-  def _navigate_adjacent_and_face(self, target_pos):
+  def _navigate_adjacent_and_face(self, target_pos) -> list[str]:
     """Move adjacent to a target cell and rotate to face it."""
     known_world = self._require_known_world()
     adjacent = [neighbor for neighbor in known_world.neighbors(target_pos)]
     path = self.plan_path_to_any(adjacent)
-    actions = self._execute_position_path(path)
+    actions: list[str] = self._execute_position_path(path)
     direction = self._delta(tuple(known_world.player_pos), tuple(target_pos))
     actions.extend(self._rotate_to(direction))
     return actions
 
-  def _execute_position_path(self, path):
+  def _execute_position_path(self, path) -> list[str]:
     """Convert a position path into Crafter actions and simulate them."""
     known_world = self._require_known_world()
-    actions = []
+    actions: list[str] = []
     for current, next_pos in zip(path, path[1:]):
       direction = self._delta(current, next_pos)
       material = known_world.material_at(next_pos)
@@ -335,7 +335,7 @@ class TaskAndMotionPlanner:
         actions.extend(self._rotate_to(direction))
         actions.append('do')
         known_world.apply_collect(next_pos)
-      move_action = self._DIR_TO_ACTION[direction]
+      move_action: str = self._DIR_TO_ACTION[direction]
       actions.append(move_action)
       known_world.apply_move_to(next_pos, direction)
     return actions
@@ -345,7 +345,7 @@ class TaskAndMotionPlanner:
     known_world = self._require_known_world()
     target_direction = tuple(target_direction)
     assert target_direction in self._DIR_TO_ACTION, f'Invalid direction: {target_direction}'
-    actions = []
+    actions: list[str] = []
     while tuple(known_world.facing) != target_direction:
       current = tuple(known_world.facing)
       clockwise = self._CLOCKWISE[current]

@@ -7,12 +7,45 @@ from omegaconf import DictConfig
 from PIL import Image
 
 import crafter
+from crafter.known_world import KnownWorld, SimpleWorld
+from crafter.task_and_motion_planner import TaskAndMotionPlanner
 
 
 def _print_actions(keymap):
     print("Actions:")
     for key, action in keymap.items():
         print(f"  {pygame.key.name(key)}: {action}")
+
+
+def _planner_tasks_finished(config: DictConfig, env_recorded) -> bool:
+    return all(
+        env_recorded._player.achievements.get(task_name, 0) > 0
+        for task_name in config.planner.task_order
+    )
+
+
+def _log_planner_results(config: DictConfig, known_world: KnownWorld):
+    for result_name in config.planner.result_logging:
+        assert (
+            result_name == "reveal_count"
+        ), f"Unsupported planner result logging entry: {result_name}"
+        print(f"Planner result ({result_name}): {known_world.revealed_cell_count}")
+
+
+def _build_planner_actions(config: DictConfig, env_recorded) -> list[str]:
+    planner_name = config.planner.name
+    assert planner_name == "vanilla", f"Unsupported planner implementation: {planner_name}"
+    known_world = KnownWorld(
+        initial_world=SimpleWorld.from_world(env_recorded._world),
+        player_pos=env_recorded._player.pos,
+        inventory=env_recorded._player.inventory.copy(),
+        facing=tuple(env_recorded._player.facing),
+    )
+    planner = TaskAndMotionPlanner(config.planner.task_order)
+    actions: list[str] = planner.plan(known_world)
+    print(f"Planner ({planner_name}) produced {len(actions)} actions.")
+    _log_planner_results(config, known_world)
+    return actions
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="run_gui")
@@ -75,7 +108,11 @@ def main(config: DictConfig):
     duration = 0
     return_ = 0
     was_done = False
+    planner_actions: list[str] = []
+    planner_action_idx = 0
     print("Diamonds exist:", env_recorded._world.count("diamond"))
+    if config.planner.enabled:
+        planner_actions: list[str] = _build_planner_actions(config, env_recorded)
 
     pygame.init()
     screen = pygame.display.set_mode(config.window)
@@ -103,6 +140,20 @@ def main(config: DictConfig):
                 running = False
             elif event.type == pygame.KEYDOWN and event.key in keymap:
                 action = keymap[event.key]
+        if config.planner.enabled and planner_action_idx < len(planner_actions):
+            action = planner_actions[planner_action_idx]
+            planner_action_idx += 1
+        elif (
+            config.planner.enabled
+            and config.planner.exit_on_finish
+            and planner_action_idx >= len(planner_actions)
+        ):
+            assert _planner_tasks_finished(
+                config, env_recorded
+            ), "Planner exhausted its actions before finishing all configured tasks."
+            print("Planner finished all configured tasks.")
+            running = False
+            continue
         if action is None:
             pressed = pygame.key.get_pressed()
             for key, action in keymap.items():
@@ -133,6 +184,12 @@ def main(config: DictConfig):
         if reward:
             print(f"Reward: {reward}")
             return_ += reward
+        if config.planner.enabled and config.planner.exit_on_finish and _planner_tasks_finished(
+            config, env_recorded
+        ):
+            print("Planner finished all configured tasks.")
+            running = False
+            continue
 
         # Episode end.
         if done and not was_done:
@@ -149,6 +206,10 @@ def main(config: DictConfig):
                 was_done = False
                 duration = 0
                 return_ = 0
+                planner_actions = []
+                planner_action_idx = 0
+                if config.planner.enabled:
+                    planner_actions = _build_planner_actions(config, env_recorded)
             if config.death == "continue":
                 pass
 

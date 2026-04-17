@@ -510,6 +510,17 @@ class KnownWorld:
     """
     return bool(self._mask[tuple(pos)])
 
+  @property
+  def revealed_cell_count(self) -> int:
+    """Return the number of revealed cells in the known-world mask.
+
+    Returns
+    -------
+    int
+        Count of ``True`` entries in the reveal mask.
+    """
+    return int(self._mask.sum())
+
   def material_at(self, pos) -> str:
     """Return the current material at a revealed cell."""
     assert self.is_known(pos), f'Attempted to access unknown material at {tuple(pos)}'
