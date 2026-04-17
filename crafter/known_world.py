@@ -521,6 +521,18 @@ class KnownWorld:
     """
     return int(self._mask.sum())
 
+  @property
+  def known_mask(self) -> np.ndarray:
+    """Return a copy of the current reveal mask.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask whose ``True`` entries are exactly the currently revealed
+        cells.
+    """
+    return self._mask.copy()
+
   def material_at(self, pos) -> str:
     """Return the current material at a revealed cell."""
     assert self.is_known(pos), f'Attempted to access unknown material at {tuple(pos)}'

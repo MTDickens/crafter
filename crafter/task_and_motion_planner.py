@@ -11,10 +11,60 @@ rather than the live environment. It repeatedly:
 from __future__ import annotations
 
 import collections
+from dataclasses import dataclass
 
 import numpy as np
 
 from crafter.known_world import KnownWorld, Task
+
+
+@dataclass
+class TaskBoundaryTrace:
+  """Planner trace entry for one task boundary.
+
+  Parameters
+  ----------
+  task_name : str
+      Name of the high-level task.
+  pre_action_index : int
+      Number of environment actions planned before the task's execution phase.
+      This is the action index immediately after ``_reveal_until_ready``.
+  post_action_index : int
+      Number of environment actions planned after the task finishes.
+  pre_action_mask : np.ndarray
+      Known-world mask after the reveal phase of this task.
+  post_action_mask : np.ndarray
+      Known-world mask after the full task finishes.
+  """
+
+  task_name: str
+  pre_action_index: int
+  post_action_index: int
+  pre_action_mask: np.ndarray
+  post_action_mask: np.ndarray
+
+
+@dataclass
+class PlanTrace:
+  """Structured planner output used by ``run_gui``.
+
+  Parameters
+  ----------
+  actions : list[str]
+      Planned Crafter action names.
+  result_metrics : dict[str, int]
+      Planner-side metrics such as reveal counts.
+  initial_known_mask : np.ndarray
+      Reveal mask before planning the first task.
+  task_boundaries : list[TaskBoundaryTrace]
+      Per-task trace entries used to align environment execution with planner
+      masks.
+  """
+
+  actions: list[str]
+  result_metrics: dict[str, int]
+  initial_known_mask: np.ndarray
+  task_boundaries: list[TaskBoundaryTrace]
 
 
 class TaskAndMotionPlanner:
@@ -94,15 +144,47 @@ class TaskAndMotionPlanner:
     - UPDATE: see `known_world.py` - micro-perception tasks will not be considered as "hard" tasks that must be finished in order.
       Instead, we will just need to reveal grids until "pre-material" + "inventory" >= required.
     """
+    return self.plan_with_trace(known_world).actions
+
+  def plan_with_trace(self, known_world: KnownWorld) -> PlanTrace:
+    """Plan the whole task sequence and return a structured trace.
+
+    Parameters
+    ----------
+    known_world : KnownWorld
+        Evolving planner state. The planner mutates this object in-place while
+        simulating reveals and successful actions.
+
+    Returns
+    -------
+    PlanTrace
+        Planned action sequence plus per-task reveal-mask snapshots.
+    """
     self._known_world = known_world
     actions: list[str] = []
+    task_boundaries: list[TaskBoundaryTrace] = []
+    initial_known_mask = self._known_world.known_mask
     for task in self.task_list:
       micro_tasks = task.get_micro_tasks(self._known_world, self._known_world.inventory)
       actions.extend(self._reveal_until_ready(task, micro_tasks))
+      pre_action_index = len(actions)
+      pre_action_mask = self._known_world.known_mask
       actions.extend(self._ensure_material_inventory(task))
       for micro_action in micro_tasks['micro_action_tasks']:
         actions.extend(self._execute_micro_action(micro_action))
-    return actions
+      task_boundaries.append(TaskBoundaryTrace(
+          task_name=task.name,
+          pre_action_index=pre_action_index,
+          post_action_index=len(actions),
+          pre_action_mask=pre_action_mask,
+          post_action_mask=self._known_world.known_mask,
+      ))
+    return PlanTrace(
+        actions=actions,
+        result_metrics={'reveal_count': self._known_world.revealed_cell_count},
+        initial_known_mask=initial_known_mask,
+        task_boundaries=task_boundaries,
+    )
 
   def reveal_next_cell_for_requirement(self, reveal_requirement):
     """Choose and reveal the next frontier cell for a requirement.

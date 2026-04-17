@@ -496,63 +496,368 @@ planner 会：
 
 所以 `_execute_position_path()` 里如果发现 `next_pos` 的 material 不是 walkable，但仍是 passable，就会先插入一次 `do`。
 
-## 12. `run_gui.py` 是怎么接 planner 的
+## 12. `run_gui.py` 现在是怎么接 planner 的
 
-`run_gui.py` 里现在多了三个关键 helper：
+这部分是这次变化最大的地方。
 
-- `_planner_tasks_finished(...)`
-- `_log_planner_results(...)`
-- `_build_planner_actions(...)`
+现在的 `run_gui.py` 不再只是“单窗口 + 单 episode + planner 预先给一串动作”，而是同时支持：
 
-### 12.1 `_build_planner_actions(...)`
+- GUI 模式；
+- headless 模式；
+- multiple episodes；
+- worker 并发；
+- planner-only（只规划不执行）；
+- task-level known-world 渲染；
+- 时间戳结果目录。
 
-它会：
+### 12.1 planner trace
 
-1. 从 `env_recorded._world` 构造 `SimpleWorld`；
-2. 用玩家当前位置、朝向、inventory 构造 `KnownWorld`；
-3. 根据 `config.planner.task_order` 构造 `TaskAndMotionPlanner`；
-4. 调 `planner.plan(known_world)`；
-5. 打印动作数和 planner result。
+`TaskAndMotionPlanner` 现在除了 `plan()`，还提供：
 
-### 12.2 主循环中的执行方式
+- `plan_with_trace(known_world)`
 
-如果 `planner.enabled = true`，主循环会优先取 planner 生成的动作：
+它会返回一个结构化 trace，而不是只返回动作列表。
 
-- `planner_action_idx < len(planner_actions)` 时，直接执行 planner 动作；
-- 否则才会退回键盘输入/按键持续按住逻辑。
+当前 trace 里最重要的信息有：
 
-### 12.3 `exit_on_finish`
+- `actions`
+- `result_metrics`
+- `initial_known_mask`
+- `task_boundaries`
+
+其中 `task_boundaries` 记录每个 task 的两个关键边界：
+
+- `pre_action_mask`
+- `post_action_mask`
+
+它们分别对应：
+
+- `pre`：`_reveal_until_ready()` 结束之后；
+- `post`：`_ensure_material_inventory()` 和 `_execute_micro_action()` 都结束之后。
+
+这正好用于后面的 task-level 渲染。
+
+### 12.2 单 episode 的 planner 构建流程
+
+在单个 episode 中，如果 `planner.enabled = true`，`run_gui.py` 会：
+
+1. `env.reset()`
+2. 从 `env_recorded._world` 构造 `SimpleWorld`
+3. 用玩家当前位置、朝向、inventory 构造 `KnownWorld`
+4. 用 `config.planner.task_order` 构造 `TaskAndMotionPlanner`
+5. 调 `planner.plan_with_trace(known_world)`
+6. 打印 planner 动作数和 planner metrics
+
+如果 `planner.plan_only = true`，流程在这里就结束，不再执行环境动作。
+
+### 12.3 执行模式
+
+如果 `planner.plan_only = false`，那么 `run_gui.py` 会把 planner 产出的 `actions` 顺序喂给环境。
+
+也就是说，当前执行模式仍然是：
+
+1. 先离线规划完整动作串；
+2. 再在线顺序执行。
+
+当前还不是边执行边 replanning。
+
+### 12.4 `exit_on_finish`
 
 如果：
 
 - `planner.enabled = true`
 - `planner.exit_on_finish = true`
 
-那么一旦 `planner.task_order` 中所有 task 对应的 achievement 都完成，GUI 会直接退出。
+那么一旦 `planner.task_order` 中所有 task 对应的 achievement 都完成，当前 episode 会立刻结束。
 
-这里的“完成”不是 planner 自己内部状态，而是环境玩家的 `achievements`。
+这里判断用的是环境玩家的 `achievements`，不是 planner 内部状态。
 
-### 12.4 `result_logging`
+### 12.5 `result_logging`
 
-当前只支持一个条目：
+当前 `result_logging` 仍然只支持：
 
 - `reveal_count`
 
-它打印的是：
+但是现在它不只是打印了，还会写进每个 episode 的 `planner_results.json`。
 
-- `KnownWorld.revealed_cell_count`
+除此之外，在执行模式下，结果文件还会额外包含：
 
-也就是 planner 最终 reveal mask 中，`True` 的数量。
+- `finished_task_count`
+- `task_count`
+- `finished_all_tasks`
+- `duration_steps`
+- `return`
 
-## 13. Hydra 配置项说明
+在 `plan_only` 模式下，这些执行期字段会写成 `null`。
 
-当前 `run_gui.yaml` 里与 planner 相关的配置项是：
+## 13. `run_gui.py` 的几种运行模式
+
+### 13.1 GUI 模式
+
+当：
+
+- `headless = false`
+
+时，程序会开一个 pygame 窗口。
+
+此时允许：
+
+- `episodes >= 1`
+- 但必须 `workers == 1`
+
+也就是说，现在已经支持“同一个窗口里顺序跑多个 episode”，但仍然不支持多窗口并发 GUI。
+
+之所以没有支持 `headless = false, workers > 1`，不是因为完全不可能，而是因为：
+
+- 这会把问题变成多进程/多窗口/事件循环管理；
+- 和当前“极简实现”的目标不一致。
+
+### 13.2 Headless 模式
+
+当：
+
+- `headless = true`
+
+时，不会创建 GUI 窗口。
+
+这个模式下必须：
+
+- `planner.enabled = true`
+
+因为当前 headless 逻辑本质上是围绕 planner 跑批设计的。
+
+此时允许：
+
+- `episodes >= 1`
+- `workers >= 1`
+
+### 13.3 Plan-only 模式
+
+当：
+
+- `planner.plan_only = true`
+
+时，当前 episode 的流程是：
+
+1. 仍然创建 env 并 `reset()` 一次；
+2. 基于这个初始环境构造 `KnownWorld`；
+3. 运行 planner；
+4. 写结果；
+5. 结束。
+
+也就是说，这里的“关闭 environment”指的是：
+
+- 不执行环境动作；
+- 不是完全不创建环境。
+
+之所以仍然需要 `reset()`，是因为 planner 还需要读取初始世界真值快照。
+
+这个模式下必须：
+
+- `headless = true`
+
+并且必须禁止一切依赖环境执行过程的功能，例如：
+
+- `record`
+- `planner.render_known_world != none`
+
+## 14. Multiple Episodes 与 Workers
+
+### 14.1 GUI 下的 multiple episodes
+
+如果：
+
+- `headless = false`
+- `episodes > 1`
+
+程序会在同一个进程、同一个窗口里顺序地跑多个 episode。
+
+每个 episode 都会：
+
+- 单独 reset 环境；
+- 单独生成 planner 结果目录；
+- 单独写自己的 `planner_results.json`。
+
+### 14.2 Headless 下的 multiple episodes
+
+如果：
+
+- `headless = true`
+- `workers = 1`
+
+那么会串行执行多个 episode。
+
+### 14.3 Headless 下的 workers 并发
+
+如果：
+
+- `headless = true`
+- `workers > 1`
+
+那么会用 `ProcessPoolExecutor` 按 episode 粒度并发执行。
+
+每个 worker 会独立：
+
+- 创建 env；
+- reset；
+- 构造 planner；
+- 写各自 episode 目录。
+
+### 14.4 seed 派生
+
+如果 `config.seed` 不为 `null`，那么第 `i` 个 episode 使用：
+
+- `seed + i`
+
+这里的 `i` 是全局 episode index，而不是某个 worker 的局部编号。
+
+如果 `config.seed = null`，则保持环境当前的随机行为。
+
+## 15. 结果目录与日志文件
+
+### 15.1 根目录
+
+当 planner 开启时，结果默认会写到：
+
+```text
+{planner.output_dir}/{timestamp}/
+```
+
+例如：
+
+```text
+planner_results/20260417T211703/
+```
+
+### 15.2 每个 episode 一个子目录
+
+每个 episode 都有自己独立的子目录：
+
+```text
+{planner.output_dir}/{timestamp}/episode-00000/
+{planner.output_dir}/{timestamp}/episode-00001/
+...
+```
+
+### 15.3 `planner_results.json`
+
+每个 episode 目录里至少会有：
+
+- `planner_results.json`
+
+当前它至少包含这些字段：
+
+- `episode_index`
+- `seed`
+- `planner_name`
+- `plan_only`
+- `planned_action_count`
+- `metrics`
+
+如果是执行模式，还会额外包含：
+
+- `finished_task_count`
+- `task_count`
+- `finished_all_tasks`
+- `duration_steps`
+- `return`
+
+### 15.4 `result_logging`
+
+`result_logging` 现在不仅是“打印什么”，更准确地说是“哪些 planner metrics 会被写入结果文件”。
+
+当前只支持：
+
+- `reveal_count`
+
+它表示 planner 最终 reveal mask 中 `True` 的数量。
+
+## 16. Task-level Known-World 渲染
+
+### 16.1 三种配置值
+
+当前 `planner.render_known_world` 有三种选择：
+
+- `none`
+- `task`
+- `step`
+
+其中：
+
+- `none`：不保存任何 known-world 图像；
+- `task`：保存 task 级别的 mask 与 png；
+- `step`：当前直接 `NotImplementedError`。
+
+### 16.2 为什么渲染是“环境真值 + planner mask”
+
+这次实现里，known-world 渲染不是直接画 planner 自己维护的 `_world`，而是：
+
+1. 先读取环境当前真实 world；
+2. 再用 planner trace 里的 known mask 做遮罩。
+
+这样做的好处是：
+
+- 已知区域里显示的是环境真实执行后的状态；
+- 未知区域仍然保持 unknown；
+- 更贴近“执行过程中 agent 目前知道什么”的直觉。
+
+### 16.3 未知区域怎么画
+
+未知区域统一渲染为灰色底色。
+
+已知区域则正常渲染：
+
+- material 的纹理；
+- 如果玩家所在格是 known，还会叠加玩家朝向对应的 player texture。
+
+### 16.4 task-level 渲染会保存哪些时刻
+
+当前 task-level 渲染一共会保存：
+
+1. `initial`
+2. 对每个 task，再保存：
+   - `pre`
+   - `post`
+
+也就是说总数固定是：
+
+- `1 + 2 * len(task_order)`
+
+其中：
+
+- `initial`：第一个 task 开始前，只有玩家起点 known；
+- `pre`：该 task 的 `_reveal_until_ready()` 结束后；
+- `post`：该 task 的 `_ensure_material_inventory()` 和 `_execute_micro_action()` 都结束后。
+
+### 16.5 保存的文件
+
+如果 `planner.render_known_world = task`，则每个 episode 目录下还会额外生成：
+
+- `known_world_masks/*.npz`
+- `known_world_images/*.png`
+
+mask 文件当前至少包含：
+
+- `known_mask`
+
+png 则是可视化后的整张世界图。
+
+## 17. Hydra 配置项说明
+
+当前 `run_gui.yaml` 中与这套 TAMP 直接相关的配置，大致可以写成：
 
 ```yaml
+headless: false
+episodes: 1
+workers: 1
+
 planner:
   enabled: true
   name: vanilla
-  exit_on_finish: false
+  exit_on_finish: true
+  output_dir: planner_results
+  plan_only: false
+  render_known_world: none
   result_logging:
     - reveal_count
   task_order:
@@ -574,23 +879,35 @@ planner:
 
 说明如下：
 
-- `enabled`
+- `headless`
+  - 是否关闭 GUI 窗口。
+- `episodes`
+  - 要跑多少个 episode。
+- `workers`
+  - 并发 worker 数；仅在 `headless = true` 下允许大于 1。
+- `planner.enabled`
   - 是否启用 planner。
-- `name`
+- `planner.name`
   - 当前 planner 名称，只支持 `vanilla`。
-- `exit_on_finish`
-  - 是否在 14 个任务都完成后自动退出。
-- `result_logging`
-  - 需要打印哪些 planner 结果，目前只支持 `reveal_count`。
-- `task_order`
+- `planner.exit_on_finish`
+  - 是否在 14 个任务都完成后提前结束当前 episode。
+- `planner.output_dir`
+  - planner 结果根目录。
+- `planner.plan_only`
+  - 是否只规划不执行。
+- `planner.render_known_world`
+  - 是否输出 known-world 可视化；`step` 目前未实现。
+- `planner.result_logging`
+  - 选择哪些 planner metrics 写入结果文件；目前只支持 `reveal_count`。
+- `planner.task_order`
   - planner 要依次执行的高层 task 列表。
 
 另外：
 
-- `defaults: - tamp_planner: vanilla` 已经在 `run_gui.yaml` 里接上了；
-- 但 `crafter/conf/tamp_planner/vanilla.yaml` 暂时还是空文件，只作为选择项占位。
+- `defaults: - tamp_planner: vanilla` 已经接在 `run_gui.yaml` 里；
+- `crafter/conf/tamp_planner/vanilla.yaml` 目前仍然是空占位文件。
 
-## 14. 为什么当前设计是 fail-fast
+## 18. 当前有哪些 fail-fast 约束
 
 当前实现尽量不做“静默容错”。
 
@@ -601,7 +918,11 @@ planner:
 - 想访问 unknown cell；
 - 目标格不可达；
 - craft cluster 不再兼容；
-- planner 动作执行完了，但 14 个任务还没完成。
+- planner 动作执行完了，但 14 个任务还没完成；
+- `headless = false` 但 `workers > 1`；
+- `headless = true` 但 `planner.enabled = false`；
+- `planner.plan_only = true` 但还开启了依赖环境执行期的渲染或 record；
+- `planner.render_known_world = step`。
 
 这样做的目的是：
 
@@ -609,29 +930,29 @@ planner:
 - 不让 planner 在错误状态下继续“装作还能运行”；
 - 方便之后迭代真正的设计，而不是被各种 fallback 掩盖问题。
 
-## 15. 当前实现有哪些刻意的简化
+## 19. 当前实现有哪些刻意的简化
 
 这套实现是可以工作的第一版，但它明确做了不少简化。
 
-### 15.1 reveal 不是环境动作
+### 19.1 reveal 不是环境动作
 
 当前 reveal 只改变 `KnownWorld`，不对应环境里的真实探索动作。
 
 所以 planner 是“离线知道地形、在线只执行动作串”的近似版本。
 
-### 15.2 1x1 reveal 仍是 uniform baseline
+### 19.2 1x1 reveal 仍是 uniform baseline
 
 虽然接口已经留成了“按 requirement 选 reveal cell”，但当前 1x1 的评分实际上还是 uniform tie-break。
 
-### 15.3 4x4 reveal 不是严格联合 Bayesian 推断
+### 19.3 4x4 reveal 不是严格联合 Bayesian 推断
 
 当前 4x4 reveal 只是“看一个格子出现在多少个可行 anchor 里”，并不是在求真正的全局联合后验最优。
 
-### 15.4 task catalog 还是代码内置
+### 19.4 task catalog 还是代码内置
 
 目前 task 定义没有搬到 Hydra/YAML，仍然写死在 `Task._TASK_DEFINITIONS` 里。
 
-### 15.5 planner 一次性生成全串动作
+### 19.5 planner 一次性生成全串动作
 
 当前不是边执行边 replanning，而是先从初始状态生成完整动作串，再交给环境执行。
 
@@ -640,7 +961,18 @@ planner:
 - 如果环境在执行中发生了 planner 未建模的动态变化；
 - 这版 planner 不会中途修正。
 
-## 16. 后续自然的扩展方向
+### 19.6 task-level 渲染只跟踪 task 边界
+
+当前只支持：
+
+- `initial`
+- 每个 task 的 `pre/post`
+
+并不支持每一步都导出 known-world 图像。
+
+所以 `render_known_world = step` 现在仍然明确是未实现。
+
+## 20. 后续自然的扩展方向
 
 如果要继续往下做，比较自然的方向有这些：
 
@@ -653,12 +985,15 @@ planner:
    - `task_finish_step`
    - `planner_inventory_trace`
 6. 把 4x4 reveal 的评分从覆盖数启发式升级为更明确的联合目标。
+7. 如果以后确实有需要，再认真支持 `headless = false, workers > 1` 的多窗口并发 GUI。
+8. 如果需要更完整的可视化，再补 step-level known-world 渲染。
 
-## 17. 一句话总结
+## 21. 一句话总结
 
 当前这版 TAMP 的核心思想是：
 
 - 用 `KnownWorld` 把“初始真值地图”和“当前已知且会演化的地图”分开；
 - 对每个高层任务先补知识，再拿材料，最后执行终结动作；
 - 用最简单可工作的 reveal 和 motion planning 先把完整主线打通；
+- 再把 planner 接入 `run_gui.py`，支持 headless、batch、plan-only、结果目录和 task-level 渲染；
 - 并且用 fail-fast 保证一旦建模假设不成立，问题会尽快暴露。

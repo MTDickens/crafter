@@ -3,6 +3,9 @@ defaults:
   - _self_
 
 seed: null
+headless: false
+episodes: 1
+workers: 1
 area: [64, 64]
 view: [70, 70]
 length: null
@@ -30,6 +33,9 @@ planner:
   enabled: true
   name: vanilla
   exit_on_finish: true
+  output_dir: planner_results
+  plan_only: false
+  render_known_world: none
   result_logging:
     - reveal_count
   task_order:
