@@ -260,9 +260,12 @@ class TaskAndMotionPlanner:
     actions = []
     while known_world.inventory.get(item, 0) < required:
       positions = known_world.available_pre_material_positions(item)
+      
       while not positions:
+        raise AssertionError(f'Since _ensure_material_inventory is only called after _reveal_until_ready, there should be some known pre-material positions for {item}, but got none')
         self.reveal_next_cell_for_requirement({'kind': 'collect', 'items': (item,)})
         positions = known_world.available_pre_material_positions(item)
+
       target = known_world.find_collect_target(item)
       actions.extend(self._navigate_adjacent_and_face(target))
       actions.append('do')
