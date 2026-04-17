@@ -3,9 +3,9 @@ defaults:
   - _self_
 
 seed: null
-headless: false
-episodes: 1
-workers: 1
+headless: true
+episodes: 30
+workers: 30
 area: [64, 64]
 view: [70, 70]
 length: null
@@ -28,14 +28,23 @@ runtime:
   energy_decreases: false
   daylight_cycle: false
 
+map_generation:
+  max_reset_attempts: 10
+  minimum_resources:
+    tree: 9
+    stone: 8
+    coal: 3
+    iron: 3
+    diamond: 1
+
 # Task and motion planner
 planner:
   enabled: true
   name: vanilla
   exit_on_finish: true
   output_dir: planner_results
-  plan_only: false
-  render_known_world: none
+  plan_only: true
+  render_known_world: none # none, task, step (not implemented)
   result_logging:
     - reveal_count
   task_order:

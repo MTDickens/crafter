@@ -69,6 +69,43 @@ def _env_size(config: DictConfig):
   return size
 
 
+def _resource_counts(env_recorded) -> dict[str, int]:
+  return {
+      resource_name: int(env_recorded._world.count(resource_name))
+      for resource_name in config_resource_names()
+  }
+
+
+def config_resource_names():
+  return ('tree', 'stone', 'coal', 'iron', 'diamond')
+
+
+def _resource_requirements_satisfied(config: DictConfig, env_recorded) -> bool:
+  for resource_name in config_resource_names():
+    required = int(config.map_generation.minimum_resources[resource_name])
+    actual = int(env_recorded._world.count(resource_name))
+    if actual < required:
+      return False
+  return True
+
+
+def _reset_until_resource_requirements_satisfied(config: DictConfig, env_recorded):
+  max_attempts = int(config.map_generation.max_reset_attempts)
+  last_counts = None
+  for attempt in range(1, max_attempts + 1):
+    env_recorded.reset()
+    last_counts = _resource_counts(env_recorded)
+    if _resource_requirements_satisfied(config, env_recorded):
+      if attempt > 1:
+        print(f'Map generation succeeded on attempt {attempt}/{max_attempts}.')
+      return
+  raise AssertionError(
+      'Failed to generate a map satisfying minimum resource counts after '
+      f'{max_attempts} attempts. Last counts: {last_counts}, '
+      f'required: {dict(config.map_generation.minimum_resources)}'
+  )
+
+
 def _planner_output_root(config: DictConfig) -> pathlib.Path | None:
   if not config.planner.enabled:
     return None
@@ -112,6 +149,13 @@ def _validate_config(config: DictConfig):
     assert (
         config.planner.render_known_world == 'none'
     ), 'planner.plan_only is incompatible with planner.render_known_world.'
+  assert config.map_generation.max_reset_attempts >= 1, (
+      'map_generation.max_reset_attempts must be at least 1.'
+  )
+  for resource_name in config_resource_names():
+    assert config.map_generation.minimum_resources[resource_name] >= 0, (
+        f'map_generation.minimum_resources.{resource_name} must be non-negative.'
+    )
 
 
 def _make_env(config: DictConfig, episode_index: int):
@@ -433,8 +477,8 @@ def _run_gui_episode(
 def _run_single_episode(config: DictConfig, episode_index: int, episode_dir: pathlib.Path | None, screen=None, clock=None):
   _apply_runtime_constants(config)
   env_recorded = _make_env(config, episode_index)
-  env_recorded.reset()
-  print('Diamonds exist:', env_recorded._world.count('diamond'))
+  _reset_until_resource_requirements_satisfied(config, env_recorded)
+  print('Resource counts:', _resource_counts(env_recorded))
   planner_trace = _build_planner_trace(config, env_recorded) if config.planner.enabled else None
 
   if config.headless:
