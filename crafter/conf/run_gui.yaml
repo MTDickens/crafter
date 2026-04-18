@@ -1,11 +1,11 @@
 defaults:
-  - tamp_planner: vanilla
+  - tamp_planner: pattern_learning
   - _self_
 
 seed: 2026
-headless: true
+headless: false
 episodes: 30
-workers: 30
+workers: 1
 area: [64, 64]
 view: [70, 70]
 length: null
@@ -40,11 +40,10 @@ map_generation:
 # Task and motion planner
 planner:
   enabled: true
-  name: vanilla
   exit_on_finish: true
   output_dir: planner_results
-  plan_only: true
-  render_known_world: none # none, task, step (not implemented)
+  plan_only: false
+  render_known_world: task # none, task, step (not implemented)
   result_logging:
     - reveal_count
   task_order:

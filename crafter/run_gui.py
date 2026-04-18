@@ -6,11 +6,14 @@ from datetime import datetime
 import hydra
 import numpy as np
 import pygame
+import torch
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 
 import crafter
 from crafter.known_world import KnownWorld, SimpleWorld
+from crafter.skills.crafter_patterns import CrafterSkillLibrary
+from crafter.training.crafter_pattern_learning import CrafterSkillLearningManager
 from crafter.task_and_motion_planner import TaskAndMotionPlanner
 
 
@@ -181,22 +184,103 @@ def _make_env(config: DictConfig, episode_index: int):
 
 def _build_planner_trace(config: DictConfig, env_recorded):
   planner_name = config.planner.name
-  assert planner_name == 'vanilla', f'Unsupported planner implementation: {planner_name}'
+  assert planner_name in {'vanilla', 'pattern_learning'}, (
+      f'Unsupported planner implementation: {planner_name}')
+  return _build_planner_trace_with_manager(config, env_recorded, skill_learning_manager=None)
+
+
+def _build_planner_trace_with_manager(
+    config: DictConfig,
+    env_recorded,
+    skill_learning_manager: CrafterSkillLearningManager | None,
+):
+  """Build one planner trace, optionally with online pattern inference."""
+  planner_name = config.planner.name
   known_world = KnownWorld(
       initial_world=SimpleWorld.from_world(env_recorded._world),
       player_pos=env_recorded._player.pos,
       inventory=env_recorded._player.inventory.copy(),
       facing=tuple(env_recorded._player.facing),
   )
+  inference_library = None
+  skill_learning_cfg = None
+  if planner_name == 'pattern_learning':
+    assert skill_learning_manager is not None, 'pattern_learning requires a skill-learning manager.'
+    if skill_learning_manager.should_use_inference():
+      inference_library = skill_learning_manager.library
+    skill_learning_cfg = config.planner.skill_learning
   planner = TaskAndMotionPlanner(
       config.planner.task_order,
       random=np.random.RandomState(env_recorded._world.random.randint(0, 2 ** 31 - 1)),
+      inference_library=inference_library,
+      skill_learning_cfg=skill_learning_cfg,
   )
   planner_trace = planner.plan_with_trace(known_world)
   print(f'Planner ({planner_name}) produced {len(planner_trace.actions)} actions.')
   for name, value in _selected_planner_metrics(config, planner_trace).items():
     print(f'Planner result ({name}): {value}')
-  return planner_trace
+  return planner_trace, known_world
+
+
+def _rebuild_pattern_learning_manager(
+    config: DictConfig,
+    library_state: dict | None,
+) -> CrafterSkillLearningManager:
+  """Rebuild a worker-local pattern-learning manager from a library snapshot."""
+  manager = CrafterSkillLearningManager(config.planner.skill_learning)
+  if library_state is None:
+    return manager
+  manager.library = CrafterSkillLibrary(
+      codec=manager.codec,
+      patterns=list(library_state['patterns']),
+      raw_weights=library_state['raw_weights'],
+      device=torch.device(str(config.planner.skill_learning.device)),
+  )
+  return manager
+
+
+def _pattern_learning_group_endpoints(config: DictConfig) -> list[int]:
+  """Return all episode indices that end a state-sharing worker group."""
+  if not (config.planner.enabled and config.planner.name == 'pattern_learning'):
+    return list(range(int(config.episodes)))
+  manager = CrafterSkillLearningManager(config.planner.skill_learning)
+  endpoints = set()
+  total_episodes = int(config.episodes)
+  for episode_index in range(total_episodes - 1):
+    if manager.should_trigger_proposal(episode_index, total_episodes):
+      endpoints.add(episode_index)
+    if manager.should_trigger_reweight(episode_index, total_episodes):
+      endpoints.add(episode_index)
+  endpoints.add(total_episodes - 1)
+  return sorted(endpoints)
+
+
+def _pattern_learning_episode_groups(config: DictConfig) -> list[list[int]]:
+  """Partition episodes into concurrency-safe groups."""
+  endpoints = _pattern_learning_group_endpoints(config)
+  groups = []
+  start = 0
+  for endpoint in endpoints:
+    groups.append(list(range(start, endpoint + 1)))
+    start = endpoint + 1
+  return groups
+
+
+def _make_pattern_learning_replay_payload(
+    known_world: KnownWorld,
+    start_pos: tuple[int, int],
+    episode_index: int,
+    seed: int | None,
+    codec,
+) -> dict:
+  """Serialize one replay entry for parent-process aggregation."""
+  return {
+      'full_map_ids': codec.encode_simple_world(known_world.initial_world, device='cpu').numpy(),
+      'final_known_mask': known_world.known_mask,
+      'start_pos': tuple(start_pos),
+      'episode_index': int(episode_index),
+      'seed': seed,
+  }
 
 
 def _snapshot_specs(planner_trace):
@@ -477,12 +561,31 @@ def _run_gui_episode(
   return _episode_execution_summary(config, env_recorded, duration, return_), user_stopped
 
 
-def _run_single_episode(config: DictConfig, episode_index: int, episode_dir: pathlib.Path | None, screen=None, clock=None):
+def _run_single_episode(
+    config: DictConfig,
+    episode_index: int,
+    episode_dir: pathlib.Path | None,
+    screen=None,
+    clock=None,
+    skill_learning_manager: CrafterSkillLearningManager | None = None,
+    return_pattern_learning_replay_payload: bool = False,
+):
   _apply_runtime_constants(config)
   env_recorded = _make_env(config, episode_index)
   _reset_until_resource_requirements_satisfied(config, env_recorded)
   print('Resource counts:', _resource_counts(env_recorded))
-  planner_trace = _build_planner_trace(config, env_recorded) if config.planner.enabled else None
+  start_pos = tuple(int(x) for x in env_recorded._player.pos)
+  planner_trace = None
+  known_world = None
+  if config.planner.enabled:
+    local_skill_learning_manager = skill_learning_manager
+    if config.planner.name == 'pattern_learning' and local_skill_learning_manager is None:
+      local_skill_learning_manager = CrafterSkillLearningManager(config.planner.skill_learning)
+    planner_trace, known_world = _build_planner_trace_with_manager(
+        config,
+        env_recorded,
+        skill_learning_manager=local_skill_learning_manager,
+    )
 
   if config.headless:
     assert planner_trace is not None, 'Headless execution requires a planner trace.'
@@ -523,13 +626,61 @@ def _run_single_episode(config: DictConfig, episode_index: int, episode_dir: pat
         episode_dir,
         _planner_result_payload(config, planner_trace, episode_index, execution_summary),
     )
-  return user_stopped
+  if config.planner.enabled and config.planner.name == 'pattern_learning':
+    assert known_world is not None
+    local_skill_learning_manager = skill_learning_manager
+    if local_skill_learning_manager is None:
+      local_skill_learning_manager = CrafterSkillLearningManager(config.planner.skill_learning)
+    replay_payload = _make_pattern_learning_replay_payload(
+        known_world=known_world,
+        start_pos=start_pos,
+        episode_index=episode_index,
+        seed=_episode_seed(config, episode_index),
+        codec=local_skill_learning_manager.codec,
+    )
+    if return_pattern_learning_replay_payload:
+      return user_stopped, replay_payload
+    assert skill_learning_manager is not None
+    skill_learning_manager.add_replay_entry(
+        full_map_ids=torch.as_tensor(replay_payload['full_map_ids'], dtype=torch.long),
+        final_known_mask=torch.as_tensor(replay_payload['final_known_mask'], dtype=torch.bool),
+        start_pos=tuple(replay_payload['start_pos']),
+        episode_index=int(replay_payload['episode_index']),
+        seed=replay_payload['seed'],
+    )
+    trained = skill_learning_manager.maybe_train(
+        episode_index=episode_index,
+        total_episodes=int(config.episodes),
+    )
+    if trained:
+      print(f'Updated pattern-learning library after episode {episode_index}.')
+  return user_stopped, None
 
 
-def _run_single_episode_worker(config_dict: dict, episode_index: int, output_root: str | None):
+def _run_single_episode_worker(
+    config_dict: dict,
+    episode_index: int,
+    output_root: str | None,
+    pattern_learning_library_state: dict | None = None,
+):
   config = OmegaConf.create(config_dict)
   episode_dir = _episode_output_dir(pathlib.Path(output_root) if output_root else None, episode_index)
-  _run_single_episode(config, episode_index, episode_dir)
+  skill_learning_manager = None
+  if config.planner.enabled and config.planner.name == 'pattern_learning':
+    skill_learning_manager = _rebuild_pattern_learning_manager(
+        config,
+        pattern_learning_library_state,
+    )
+  _, replay_payload = _run_single_episode(
+      config,
+      episode_index,
+      episode_dir,
+      skill_learning_manager=skill_learning_manager,
+      return_pattern_learning_replay_payload=(
+          config.planner.enabled and config.planner.name == 'pattern_learning'
+      ),
+  )
+  return replay_payload
 
 
 @hydra.main(version_base=None, config_path='conf', config_name='run_gui')
@@ -558,12 +709,53 @@ def main(config: DictConfig):
   _print_actions(keymap)
 
   output_root = _planner_output_root(config)
+  skill_learning_manager = None
+  if config.planner.enabled and config.planner.name == 'pattern_learning':
+    skill_learning_manager = CrafterSkillLearningManager(config.planner.skill_learning)
   if config.headless:
     config_dict = OmegaConf.to_container(config, resolve=True)
     if config.workers == 1:
       for episode_index in range(config.episodes):
         episode_dir = _episode_output_dir(output_root, episode_index)
-        _run_single_episode(config, episode_index, episode_dir)
+        _run_single_episode(
+            config,
+            episode_index,
+            episode_dir,
+            skill_learning_manager=skill_learning_manager,
+        )
+      return
+    if config.planner.name == 'pattern_learning':
+      with concurrent.futures.ProcessPoolExecutor(max_workers=config.workers) as executor:
+        for episode_group in _pattern_learning_episode_groups(config):
+          library_state = skill_learning_manager.export_library_state()
+          futures = [
+              executor.submit(
+                  _run_single_episode_worker,
+                  config_dict,
+                  episode_index,
+                  str(output_root) if output_root else None,
+                  library_state,
+              )
+              for episode_index in episode_group
+          ]
+          replay_payloads = [future.result() for future in futures]
+          replay_payloads = [payload for payload in replay_payloads if payload is not None]
+          replay_payloads.sort(key=lambda payload: payload['episode_index'])
+          for payload in replay_payloads:
+            skill_learning_manager.add_replay_entry(
+                full_map_ids=torch.as_tensor(payload['full_map_ids'], dtype=torch.long),
+                final_known_mask=torch.as_tensor(payload['final_known_mask'], dtype=torch.bool),
+                start_pos=tuple(payload['start_pos']),
+                episode_index=int(payload['episode_index']),
+                seed=payload['seed'],
+            )
+          last_episode_index = episode_group[-1]
+          trained = skill_learning_manager.maybe_train(
+              episode_index=last_episode_index,
+              total_episodes=int(config.episodes),
+          )
+          if trained:
+            print(f'Updated pattern-learning library after episode {last_episode_index}.')
       return
     with concurrent.futures.ProcessPoolExecutor(max_workers=config.workers) as executor:
       futures = [
@@ -585,7 +777,14 @@ def main(config: DictConfig):
   try:
     for episode_index in range(config.episodes):
       episode_dir = _episode_output_dir(output_root, episode_index)
-      user_stopped = _run_single_episode(config, episode_index, episode_dir, screen=screen, clock=clock)
+      user_stopped, _ = _run_single_episode(
+          config,
+          episode_index,
+          episode_dir,
+          screen=screen,
+          clock=clock,
+          skill_learning_manager=skill_learning_manager,
+      )
       if user_stopped:
         break
   finally:

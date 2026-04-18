@@ -14,8 +14,12 @@ import collections
 from dataclasses import dataclass
 
 import numpy as np
+import torch
 
+from crafter import constants
 from crafter.known_world import KnownWorld, Task
+from crafter.skills.crafter_patterns import CrafterSkillLibrary
+from crafter.utils.crafter_codec import CrafterTileCodec
 
 
 @dataclass
@@ -93,7 +97,13 @@ class TaskAndMotionPlanner:
   }
   _COUNTERCLOCKWISE = {value: key for key, value in _CLOCKWISE.items()}
 
-  def __init__(self, task_list=None, random=None):
+  def __init__(
+      self,
+      task_list=None,
+      random=None,
+      inference_library: CrafterSkillLibrary | None = None,
+      skill_learning_cfg=None,
+  ):
     """Construct the planner.
 
     Parameters
@@ -117,6 +127,9 @@ class TaskAndMotionPlanner:
     ]
     self.random = random or np.random.RandomState()
     self._known_world: KnownWorld | None = None
+    self.inference_library = inference_library
+    self.skill_learning_cfg = skill_learning_cfg
+    self.codec = CrafterTileCodec.for_worldgen_materials()
 
   def plan(self, known_world: KnownWorld) -> list[str]:
     """Plan and simulate the whole task sequence.
@@ -233,25 +246,24 @@ class TaskAndMotionPlanner:
           e.g. first 1x1 (if any), then 2x2 (if any), then 3x3 (if any), then 4x4 (if any)
     """
     known_world = self._require_known_world()
+    self._maybe_apply_hard_inference(reveal_requirement)
     kind = reveal_requirement['kind']
     if kind == 'collect':
       candidates = known_world.frontier_unknowns()
       assert candidates, f'No legal frontier cells exist for collect reveal: {reveal_requirement}'
-      target = self._pick_uniform_best(candidates)
+      target = self._pick_collect_reveal_target(candidates, reveal_requirement)
       known_world.reveal_cell(target)
       return target
     if kind == 'layout':
       scores = known_world.layout_reveal_scores(reveal_requirement['name'])
       assert scores, f'No legal frontier cells exist for layout reveal: {reveal_requirement}'
-      best_score = max(scores.values())
-      candidates = [pos for pos, score in scores.items() if score == best_score]
-      target = self._pick_uniform_best(candidates)
+      target = self._pick_layout_reveal_target(scores)
       known_world.reveal_cell(target)
       return target
     if kind == 'place_1x1':
       candidates = known_world.placeable_frontier_candidates_1x1(reveal_requirement['name'])
       assert candidates, f'No legal frontier cells exist for 1x1 placement reveal: {reveal_requirement}'
-      target = self._pick_uniform_best(candidates)
+      target = self._pick_place_1x1_reveal_target(candidates, reveal_requirement['name'])
       known_world.reveal_cell(target)
       return target
     raise AssertionError(f'Unknown reveal requirement: {reveal_requirement}')
@@ -451,6 +463,103 @@ class TaskAndMotionPlanner:
     assert candidates, 'Expected at least one reveal candidate'
     index = self.random.randint(0, len(candidates))
     return tuple(candidates[index])
+
+  def _known_world_partial_ids(self) -> torch.Tensor:
+    known_world = self._require_known_world()
+    return self.codec.encode_known_world_initial_partial(known_world, device='cpu')
+
+  def _candidate_mask(self, candidates) -> torch.Tensor:
+    known_world = self._require_known_world()
+    mask = torch.zeros(known_world.known_mask.shape, dtype=torch.bool)
+    for pos in candidates:
+      mask[pos] = True
+    return mask
+
+  def _maybe_apply_hard_inference(self, reveal_requirement):
+    del reveal_requirement
+    if self.inference_library is None or self.skill_learning_cfg is None:
+      return
+    if not bool(self.skill_learning_cfg.enable_hard_inference):
+      return
+    threshold = float(self.skill_learning_cfg.infer_prob_threshold)
+    if threshold >= 1.0:
+      return
+    partial_ids = self._known_world_partial_ids()
+    candidate_mask = self._candidate_mask(self._require_known_world().frontier_unknowns())
+    updated, inferred_positions = self.inference_library.maybe_hard_infer(
+        partial_map_ids=partial_ids,
+        eps=float(self.skill_learning_cfg.eps),
+        threshold=threshold,
+        candidate_mask=candidate_mask,
+    )
+    del updated
+    for pos in inferred_positions:
+      if not self._require_known_world().is_known(pos):
+        self._require_known_world().reveal_cell(pos)
+
+  def _pick_collect_reveal_target(self, candidates, reveal_requirement):
+    if self.inference_library is None or self.skill_learning_cfg is None:
+      return self._pick_uniform_best(candidates)
+    known_world = self._require_known_world()
+    target_materials = []
+    for item in reveal_requirement['items']:
+      target_materials.extend(known_world._ITEM_TO_SOURCES[item])
+    partial_ids = self._known_world_partial_ids()
+    target_class_ids = [
+        self.codec.encode_material(material)
+        for material in sorted(set(target_materials))
+    ]
+    scores = self.inference_library.score_candidate_cells(
+        partial_map_ids=partial_ids,
+        candidate_mask=self._candidate_mask(candidates),
+        class_ids=target_class_ids,
+        eps=float(self.skill_learning_cfg.eps),
+    )
+    return self._pick_best_scored_cell(candidates, scores)
+
+  def _pick_place_1x1_reveal_target(self, candidates, place_name: str):
+    if self.inference_library is None or self.skill_learning_cfg is None:
+      return self._pick_uniform_best(candidates)
+    target_class_ids = [
+        self.codec.encode_material(material)
+        for material in set(constants.place[place_name]['where'])
+        if material in self.codec.materials
+    ]
+    scores = self.inference_library.score_candidate_cells(
+        partial_map_ids=self._known_world_partial_ids(),
+        candidate_mask=self._candidate_mask(candidates),
+        class_ids=target_class_ids,
+        eps=float(self.skill_learning_cfg.eps),
+    )
+    return self._pick_best_scored_cell(candidates, scores)
+
+  def _pick_layout_reveal_target(self, vanilla_scores):
+    candidates = list(vanilla_scores)
+    if self.inference_library is None or self.skill_learning_cfg is None:
+      best_score = max(vanilla_scores.values())
+      return self._pick_uniform_best([pos for pos, score in vanilla_scores.items() if score == best_score])
+    partial_ids = self._known_world_partial_ids()
+    walkable_ids = [
+        self.codec.encode_material(material)
+        for material in ('grass', 'path', 'sand')
+    ]
+    walkable_scores = self.inference_library.score_candidate_cells(
+        partial_map_ids=partial_ids,
+        candidate_mask=self._candidate_mask(candidates),
+        class_ids=walkable_ids,
+        eps=float(self.skill_learning_cfg.eps),
+    )
+    combined = {
+        pos: float(walkable_scores[pos].item()) + float(vanilla_scores[pos])
+        for pos in candidates
+    }
+    best_score = max(combined.values())
+    return self._pick_uniform_best([pos for pos, score in combined.items() if score == best_score])
+
+  def _pick_best_scored_cell(self, candidates, scores: torch.Tensor):
+    best_score = max(float(scores[pos].item()) for pos in candidates)
+    best = [pos for pos in candidates if float(scores[pos].item()) == best_score]
+    return self._pick_uniform_best(best)
 
   def _delta(self, lhs, rhs):
     return (rhs[0] - lhs[0], rhs[1] - lhs[1])

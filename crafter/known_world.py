@@ -217,6 +217,20 @@ class SimpleWorld:
   def count(self, material):
     return int((self._mat_map == self._mat_ids[material]).sum())
 
+  def material_name_grid(self) -> np.ndarray:
+    """Return the current material-name grid.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(width, height)`` whose entries are material-name
+        strings.
+    """
+    grid = np.empty(self.area, dtype=object)
+    for pos in _positions_within(self.area):
+      grid[pos] = self[pos][0]
+    return grid
+
   def chunk_key(self, pos):
     (x, y), (csx, csy) = pos, self._chunk_size
     xmin, ymin = (x // csx) * csx, (y // csy) * csy
@@ -532,6 +546,17 @@ class KnownWorld:
         cells.
     """
     return self._mask.copy()
+
+  @property
+  def initial_world(self) -> SimpleWorld:
+    """Return the immutable reveal-source world snapshot.
+
+    Returns
+    -------
+    SimpleWorld
+        Initial world used as the source of future reveals.
+    """
+    return self._initial_world
 
   def material_at(self, pos) -> str:
     """Return the current material at a revealed cell."""

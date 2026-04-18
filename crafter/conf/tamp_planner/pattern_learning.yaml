@@ -1,0 +1,81 @@
+# @package planner
+
+name: pattern_learning
+
+skill_learning:
+  enable_inference: true
+  enable_reweighting: true
+  enable_hard_inference: true
+
+  replay_buffer:
+    capacity: 20
+
+  sampling_method:
+    mode: connected_reverse_trajectory
+    pure_samples_per_map: 20
+    # pure_drop_prob: 0.5
+    seed: 42
+
+  eps: 1e-3
+  device: mps
+
+  # limit: 5
+  # train_on_full_desc: false
+  # exploration_extra_points_per_map: 15
+  train_trigger_interval: 10
+  infer_prob_threshold: 1.0
+  max_example_learned: 400
+
+  initial_patterns:
+    add_center_only_placeholders: true
+    presets:
+      - center: grass
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      - center: tree
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      - center: stone
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: coal
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: iron
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: diamond
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+
+  skill_proposal:
+    enabled: false
+    trigger_interval: 10
+    patterns_per_trigger: 5
+    max_examples_in_prompt: 5
+    dummy_response_path: null
+    llm_cfg:
+      use_openai_sdk: true
+      api_type: completion
+      api_key: ${oc.env:OPENROUTER_API_KEY}
+      base_url: https://openrouter.ai/api/v1
+      model_name: qwen/qwen3.5-9b
+      model_provider: alibaba
+      max_completion_tokens: 3000
+      temperature: 0.0
+
+  lbfgs:
+    max_iters: 150
+    lr: 1.0
