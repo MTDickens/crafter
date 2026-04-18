@@ -31,6 +31,7 @@ dependencies = [
     "openai>=2.32.0",
     "tenacity>=9.1.4",
     "cairosvg>=2.9.0",
+    "matplotlib>=3.10.8",
 ]
 
 [tool.ruff]

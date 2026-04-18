@@ -10,3 +10,6 @@ __pycache__/
 
 # Planner results
 planner_results/
+
+# Plots
+plots/*.png
