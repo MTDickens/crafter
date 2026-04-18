@@ -3,9 +3,9 @@ defaults:
   - _self_
 
 seed: 2026
-headless: false
-episodes: 30
-workers: 1
+headless: true
+episodes: 100
+workers: 50
 area: [64, 64]
 view: [70, 70]
 length: null
@@ -29,7 +29,7 @@ runtime:
   daylight_cycle: false
 
 map_generation:
-  max_reset_attempts: 10
+  max_reset_attempts: 20
   minimum_resources:
     tree: 9
     stone: 8
@@ -42,8 +42,8 @@ planner:
   enabled: true
   exit_on_finish: true
   output_dir: planner_results
-  plan_only: false
-  render_known_world: task # none, task, step (not implemented)
+  plan_only: true
+  render_known_world: none # none, task, step (not implemented)
   result_logging:
     - reveal_count
   task_order:
