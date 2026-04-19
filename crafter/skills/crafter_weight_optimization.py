@@ -12,21 +12,22 @@ from crafter.skills.crafter_patterns import CrafterSkillLibrary
 
 @dataclass(slots=True)
 class CrafterTransitionExample:
-  """One single-cell next-reveal training example.
+  """One partial-map training example with one or more supervised targets.
 
   Parameters
   ----------
   partial_map_ids : torch.Tensor
-      Integer partial map before the reveal.
-  target_pos : tuple[int, int]
-      Position of the newly revealed center cell.
-  target_class_id : int
-      True class of that newly revealed center cell.
+      Integer partial map shown to the learner.
+  target_positions : tuple[tuple[int, int], ...]
+      Positions supervised by this example.
+  target_class_ids : tuple[int, ...]
+      True classes of the supervised positions. This tuple must align with
+      ``target_positions`` one-to-one.
   """
 
   partial_map_ids: torch.Tensor
-  target_pos: tuple[int, int]
-  target_class_id: int
+  target_positions: tuple[tuple[int, int], ...]
+  target_class_ids: tuple[int, ...]
 
 
 @dataclass(slots=True)
@@ -37,12 +38,12 @@ class PositiveWeightOptimizationResult:
   loss_history: list[float]
 
 
-def single_transition_loss(
+def single_example_loss(
     library: CrafterSkillLibrary,
     example: CrafterTransitionExample,
     eps: float,
 ) -> torch.Tensor:
-  """Return the smoothed single-cell cross-entropy loss.
+  """Return the smoothed mean cross-entropy loss for one training example.
 
   Parameters
   ----------
@@ -56,30 +57,41 @@ def single_transition_loss(
   Returns
   -------
   torch.Tensor
-      Scalar loss tensor.
+      Scalar loss tensor equal to the mean loss over all supervised target
+      positions in ``example``.
   """
+  if len(example.target_positions) == 0:
+    raise ValueError('Expected at least one target position per training example.')
+  if len(example.target_positions) != len(example.target_class_ids):
+    raise ValueError(
+      'target_positions and target_class_ids must have the same length.'
+    )
   inferred = library.infer_probs(example.partial_map_ids, eps=eps)
-  target = torch.full(
-      (library.codec.num_classes,),
-      eps / max(library.codec.num_classes - 1, 1),
-      dtype=torch.float32,
-      device=library.device,
-  )
-  target[example.target_class_id] = 1.0 - eps
-  predicted = inferred[:, example.target_pos[0], example.target_pos[1]]
-  log_predicted = torch.log(predicted)
-  return -(target * log_predicted).sum()
+  losses = []
+  for target_pos, target_class_id in zip(
+      example.target_positions, example.target_class_ids, strict=True):
+    target = torch.full(
+        (library.codec.num_classes,),
+        eps / max(library.codec.num_classes - 1, 1),
+        dtype=torch.float32,
+        device=library.device,
+    )
+    target[target_class_id] = 1.0 - eps
+    predicted = inferred[:, target_pos[0], target_pos[1]]
+    log_predicted = torch.log(predicted)
+    losses.append(-(target * log_predicted).sum())
+  return torch.stack(losses).mean()
 
 
-def mean_transition_loss(
+def mean_example_loss(
     library: CrafterSkillLibrary,
     examples: Sequence[CrafterTransitionExample],
     eps: float,
 ) -> torch.Tensor:
-  """Return the mean loss over transition examples."""
+  """Return the mean loss over training examples."""
   if not examples:
-    raise ValueError('Expected at least one transition example.')
-  losses = [single_transition_loss(library, example, eps=eps) for example in examples]
+    raise ValueError('Expected at least one training example.')
+  losses = [single_example_loss(library, example, eps=eps) for example in examples]
   return torch.stack(losses).mean()
 
 
@@ -133,7 +145,7 @@ class PositiveWeightCrafterSolver:
     def closure():
       optimizer.zero_grad()
       library.raw_weights = parameter
-      loss = mean_transition_loss(library, examples, eps=eps)
+      loss = mean_example_loss(library, examples, eps=eps)
       if torch.isnan(loss) or torch.isinf(loss):
         raise AssertionError('Weight optimization produced nan/inf loss.')
       loss.backward()

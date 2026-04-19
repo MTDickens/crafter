@@ -104,7 +104,24 @@ def build_connected_reverse_trajectory_examples(
   seed: int,
   unknown_id: int,
 ) -> list[CrafterTransitionExample]:
-  """Build next-reveal transition examples from one replay entry."""
+  """Build single-target reveal-trajectory examples from one replay entry.
+
+  Parameters
+  ----------
+  replay_entry : CrafterReplayEntry
+      Replay-buffer entry that provides the final known mask.
+  pure_samples_per_map : int
+      Number of random reveal trajectories to sample.
+  seed : int
+      Sampling seed.
+  unknown_id : int
+      Token used for hidden cells.
+
+  Returns
+  -------
+  list[CrafterTransitionExample]
+      Training examples whose target list always has length 1.
+  """
   rng = np.random.default_rng(seed)
   examples: list[CrafterTransitionExample] = []
   known_mask_np = replay_entry.final_known_mask.detach().cpu().numpy().astype(bool)
@@ -124,12 +141,78 @@ def build_connected_reverse_trajectory_examples(
       examples.append(
         CrafterTransitionExample(
           partial_map_ids=partial,
-          target_pos=tuple(pos),
-          target_class_id=int(full_map_ids[pos]),
+          target_positions=(tuple(pos),),
+          target_class_ids=(int(full_map_ids[pos]),),
         )
       )
       prefix_mask[pos] = True
     del sample_index
+  return examples
+
+
+def build_iid_known_drop_examples(
+  replay_entry: CrafterReplayEntry,
+  pure_samples_per_map: int,
+  pure_drop_prob: float,
+  seed: int,
+  unknown_id: int,
+) -> list[CrafterTransitionExample]:
+  """Build IID-known-drop training examples from one replay entry.
+
+  Each sampled example independently drops every currently known grid with
+  probability ``pure_drop_prob``. The remaining known grids form the input
+  partial map; every dropped known grid is supervised jointly.
+
+  Parameters
+  ----------
+  replay_entry : CrafterReplayEntry
+      Replay-buffer entry that provides the final known mask.
+  pure_samples_per_map : int
+      Number of valid IID-drop examples to produce.
+  pure_drop_prob : float
+      Bernoulli drop probability for each known cell.
+  seed : int
+      Sampling seed.
+  unknown_id : int
+      Token used for hidden cells.
+
+  Returns
+  -------
+  list[CrafterTransitionExample]
+      Joint-supervision training examples.
+  """
+  assert 0.0 <= pure_drop_prob <= 1.0, (
+      f'pure_drop_prob must lie in [0, 1], got {pure_drop_prob}'
+  )
+  rng = np.random.default_rng(seed)
+  examples: list[CrafterTransitionExample] = []
+  known_mask_np = replay_entry.final_known_mask.detach().cpu().numpy().astype(bool)
+  full_map_ids = replay_entry.full_map_ids.to(dtype=torch.long)
+  max_attempts = max(int(pure_samples_per_map) * 100, 100)
+  attempts = 0
+  while len(examples) < int(pure_samples_per_map) and attempts < max_attempts:
+    attempts += 1
+    drop_mask = known_mask_np & (rng.random(known_mask_np.shape) < pure_drop_prob)
+    if not drop_mask.any():
+      continue
+    observed_mask = known_mask_np & (~drop_mask)
+    partial = torch.full_like(full_map_ids, fill_value=unknown_id)
+    partial[observed_mask] = full_map_ids[observed_mask]
+    target_positions = tuple(
+        (int(x), int(y))
+        for x, y in zip(*np.nonzero(drop_mask), strict=True)
+    )
+    target_class_ids = tuple(int(full_map_ids[pos]) for pos in target_positions)
+    examples.append(CrafterTransitionExample(
+        partial_map_ids=partial,
+        target_positions=target_positions,
+        target_class_ids=target_class_ids,
+    ))
+  assert len(examples) == int(pure_samples_per_map), (
+      'Failed to construct enough iid_known_drop examples. '
+      f'Generated {len(examples)} / {pure_samples_per_map} valid examples '
+      f'after {attempts} attempts with pure_drop_prob={pure_drop_prob}.'
+  )
   return examples
 
 
@@ -251,15 +334,33 @@ class CrafterSkillLearningManager:
     replay_entries: Iterable[CrafterReplayEntry],
   ) -> list[CrafterTransitionExample]:
     examples: list[CrafterTransitionExample] = []
+    mode = str(self.cfg.sampling_method.mode)
     for replay_entry in replay_entries:
       entry_seed = int(self._rng.integers(0, 2**31 - 1))
-      examples.extend(
-        build_connected_reverse_trajectory_examples(
-          replay_entry=replay_entry,
-          pure_samples_per_map=int(self.cfg.sampling_method.pure_samples_per_map),
-          seed=entry_seed,
-          unknown_id=self.codec.unknown_id,
+      if mode == 'connected_reverse_trajectory':
+        examples.extend(
+          build_connected_reverse_trajectory_examples(
+            replay_entry=replay_entry,
+            pure_samples_per_map=int(self.cfg.sampling_method.pure_samples_per_map),
+            seed=entry_seed,
+            unknown_id=self.codec.unknown_id,
+          )
         )
+        continue
+      if mode == 'iid_known_drop':
+        examples.extend(
+          build_iid_known_drop_examples(
+            replay_entry=replay_entry,
+            pure_samples_per_map=int(self.cfg.sampling_method.pure_samples_per_map),
+            pure_drop_prob=float(self.cfg.sampling_method.pure_drop_prob),
+            seed=entry_seed,
+            unknown_id=self.codec.unknown_id,
+          )
+        )
+        continue
+      raise AssertionError(
+        f'Unsupported sampling_method.mode: {mode}. '
+        'Expected one of: connected_reverse_trajectory, iid_known_drop.'
       )
     return examples
 

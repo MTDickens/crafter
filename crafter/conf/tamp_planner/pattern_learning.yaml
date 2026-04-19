@@ -11,9 +11,9 @@ skill_learning:
     capacity: 20
 
   sampling_method:
-    mode: connected_reverse_trajectory
+    mode: iid_known_drop # connected_reverse_trajectory or iid_known_drop
     pure_samples_per_map: 20
-    # pure_drop_prob: 0.5
+    pure_drop_prob: 0.5 # only used for iid_known_drop
     seed: 42
 
   eps: 1e-3
@@ -24,12 +24,13 @@ skill_learning:
   # exploration_extra_points_per_map: 15
   train_trigger_interval: 5
   infer_prob_threshold: 1.0
-  max_example_learned: 400
+  max_example_learned: 100
   max_example_learned_order: random # first, last, random
 
   initial_patterns:
     add_center_only_placeholders: true
     presets:
+      # Corrent Patterns
       - center: grass
         top: grass
         bottom: grass
@@ -60,6 +61,131 @@ skill_learning:
         bottom: stone
         left: stone
         right: stone
+      # Wrong Patterns Main
+      - center: grass
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: tree
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: stone
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      - center: coal
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      - center: iron
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      - center: diamond
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      # Wrong Patterns Alter 1
+      - center: grass
+        top: stone
+        bottom: stone
+        left: path
+        right: path
+      - center: tree
+        top: grass
+        bottom: stone
+        left: grass
+        right: stone
+      - center: stone
+        top: grass
+        bottom: grass
+        left: path
+        right: path
+      - center: coal
+        top: grass
+        bottom: stone
+        left: stone
+        right: grass
+      - center: iron
+        top: path
+        bottom: grass
+        left: grass
+        right: path
+      - center: diamond
+        top: stone
+        bottom: stone
+        left: grass
+        right: grass
+      # Wrong Patterns Alter 2
+      - center: grass
+        top: stone
+        bottom: stone
+        left: grass
+        right: path
+      - center: tree
+        top: path
+        bottom: stone
+        left: grass
+        right: stone
+      - center: stone
+        top: grass
+        bottom: grass
+        left: sand
+        right: path
+      - center: coal
+        top: grass
+        bottom: sand
+        left: stone
+        right: grass
+      - center: iron
+        top: water
+        bottom: grass
+        left: grass
+        right: path
+      - center: diamond
+        top: stone
+        bottom: lava
+        left: grass
+        right: grass
+      # Wrong Patterns Alter 3
+      - center: grass
+        top: lava
+        bottom: stone
+        left: grass
+        right: path
+      - center: tree
+        top: path
+        bottom: sand
+        left: grass
+        right: stone
+      - center: stone
+        top: grass
+        bottom: water
+        left: sand
+        right: path
+      - center: coal
+        top: grass
+        bottom: sand
+        left: stone
+        right: water
+      - center: iron
+        top: water
+        bottom: grass
+        left: sand
+        right: path
+      - center: diamond
+        top: stone
+        bottom: lava
+        left: grass
+        right: path
+
 
   skill_proposal:
     enabled: false
