@@ -348,7 +348,66 @@ def _flush_task_snapshots(pending_snapshots: dict[int, list], action_count: int,
     _save_known_world_snapshot(episode_dir, snapshot_name, known_mask, env_recorded)
 
 
-def _planner_result_payload(config: DictConfig, planner_trace, episode_index: int, executed_summary: dict | None):
+def _pattern_key(codec, pattern) -> str:
+  center = codec.decode_material(pattern.center_id)
+  if not pattern.use_gating:
+    return f'ungated:center={center}'
+  top = codec.decode_material(pattern.top_id)
+  bottom = codec.decode_material(pattern.bottom_id)
+  left = codec.decode_material(pattern.left_id)
+  right = codec.decode_material(pattern.right_id)
+  return (
+      f'gated:center={center},top={top},bottom={bottom},left={left},right={right}'
+  )
+
+
+def _pattern_learning_library_payload(
+    skill_learning_manager: CrafterSkillLearningManager | None,
+) -> dict | None:
+  if skill_learning_manager is None:
+    return None
+  library = skill_learning_manager.library
+  codec = skill_learning_manager.codec
+  positive_weights = library.positive_weights().detach().cpu().tolist()
+  raw_weights = library.raw_weights.detach().cpu().tolist()
+  patterns = []
+  for index, pattern in enumerate(library.patterns):
+    center = codec.decode_material(pattern.center_id)
+    if pattern.use_gating:
+      top = codec.decode_material(pattern.top_id)
+      bottom = codec.decode_material(pattern.bottom_id)
+      left = codec.decode_material(pattern.left_id)
+      right = codec.decode_material(pattern.right_id)
+      pattern_kind = 'gated_cross'
+    else:
+      top = bottom = left = right = None
+      pattern_kind = 'ungated_center_only'
+    patterns.append({
+        'pattern_index': index,
+        'pattern_key': _pattern_key(codec, pattern),
+        'kind': pattern_kind,
+        'use_gating': bool(pattern.use_gating),
+        'center': center,
+        'top': top,
+        'bottom': bottom,
+        'left': left,
+        'right': right,
+        'raw_weight': float(raw_weights[index]),
+        'positive_weight': float(positive_weights[index]),
+    })
+  return {
+      'num_patterns': len(patterns),
+      'patterns': patterns,
+  }
+
+
+def _planner_result_payload(
+    config: DictConfig,
+    planner_trace,
+    episode_index: int,
+    executed_summary: dict | None,
+    skill_learning_manager: CrafterSkillLearningManager | None = None,
+):
   payload = {
       'episode_index': episode_index,
       'seed': _episode_seed(config, episode_index),
@@ -357,6 +416,9 @@ def _planner_result_payload(config: DictConfig, planner_trace, episode_index: in
       'planned_action_count': len(planner_trace.actions),
       'metrics': _selected_planner_metrics(config, planner_trace),
   }
+  pattern_learning_library = _pattern_learning_library_payload(skill_learning_manager)
+  if pattern_learning_library is not None:
+    payload['pattern_learning_library'] = pattern_learning_library
   if executed_summary is not None:
     payload.update(executed_summary)
   return payload
@@ -577,8 +639,8 @@ def _run_single_episode(
   start_pos = tuple(int(x) for x in env_recorded._player.pos)
   planner_trace = None
   known_world = None
+  local_skill_learning_manager = skill_learning_manager
   if config.planner.enabled:
-    local_skill_learning_manager = skill_learning_manager
     if config.planner.name == 'pattern_learning' and local_skill_learning_manager is None:
       local_skill_learning_manager = CrafterSkillLearningManager(config.planner.skill_learning)
     planner_trace, known_world = _build_planner_trace_with_manager(
@@ -624,11 +686,16 @@ def _run_single_episode(
   if planner_trace is not None:
     _write_planner_results(
         episode_dir,
-        _planner_result_payload(config, planner_trace, episode_index, execution_summary),
+        _planner_result_payload(
+            config,
+            planner_trace,
+            episode_index,
+            execution_summary,
+            skill_learning_manager=local_skill_learning_manager,
+        ),
     )
   if config.planner.enabled and config.planner.name == 'pattern_learning':
     assert known_world is not None
-    local_skill_learning_manager = skill_learning_manager
     if local_skill_learning_manager is None:
       local_skill_learning_manager = CrafterSkillLearningManager(config.planner.skill_learning)
     replay_payload = _make_pattern_learning_replay_payload(

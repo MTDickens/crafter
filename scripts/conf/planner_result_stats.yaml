@@ -3,16 +3,20 @@ defaults:
   - override hydra/hydra_logging: disabled
   - _self_
 
-input_root: planner_results
+input_root: planner_results_260419
 
 timestamps:
   # - 20260418T234848
   # - 20260419T001041
-  - 20260419T014812
-  - 20260419T014830
-  - 20260419T021030
-  - 20260419T023525
-  - 20260419T025702
+  # - 20260419T014812
+  # - 20260419T014830
+  # - 20260419T021030
+  # - 20260419T023525
+  # - 20260419T025702
+  - 20260419T175547
+  - 20260419T180448
+  - 20260419T185828
+  - 20260419T185853
 
 metrics:
   - metrics.reveal_count
@@ -27,7 +31,17 @@ plot:
   metric: metrics.reveal_count
   layout: same_axes # same_axes or separate_axes
   title: Planner Result Metric by Episode
-  output_path: plots/planner_result_stats.png
+  output_path: plots/planner_result_stats_250419.png
+
+pattern_library:
+  enabled: false
+  output_path: null
+  weight_field: positive_weight # raw_weight or positive_weight
+  plot:
+    enabled: true
+    title: Pattern Weights by Episode
+    output_path: plots/pattern_learning_weights_250419.png
+    yscale: linear # linear or log
 
 hydra:
   run:

@@ -10,6 +10,10 @@ __pycache__/
 
 # Planner results
 planner_results/
+planner_results_260419/
 
 # Plots
 plots/*.png
+
+# Profiling
+analysis/
