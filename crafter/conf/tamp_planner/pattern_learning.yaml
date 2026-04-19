@@ -25,6 +25,7 @@ skill_learning:
   train_trigger_interval: 5
   infer_prob_threshold: 1.0
   max_example_learned: 400
+  max_example_learned_order: random # first, last, random
 
   initial_patterns:
     add_center_only_placeholders: true
