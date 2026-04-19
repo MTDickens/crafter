@@ -22,9 +22,9 @@ from omegaconf import DictConfig
 
 def _episode_dirs(timestamp_dir: Path) -> list[Path]:
   episode_dirs = sorted(
-      path
-      for path in timestamp_dir.iterdir()
-      if path.is_dir() and path.name.startswith('episode-')
+    path
+    for path in timestamp_dir.iterdir()
+    if path.is_dir() and path.name.startswith('episode-')
   )
   assert episode_dirs, f'No episode directories found under {timestamp_dir}'
   return episode_dirs
@@ -44,9 +44,13 @@ def _load_episode_payloads(timestamp_dir: Path) -> list[dict]:
 def _get_metric(payload: dict, dotted_key: str):
   value = payload
   for key in dotted_key.split('.'):
-    assert isinstance(value, dict), f'Expected dict while reading {dotted_key}, got {type(value)}'
+    assert isinstance(value, dict), (
+      f'Expected dict while reading {dotted_key}, got {type(value)}'
+    )
     value = value[key]
-  assert isinstance(value, int | float), f'Metric must be numeric: {dotted_key} -> {value!r}'
+  assert isinstance(value, int | float), (
+    f'Metric must be numeric: {dotted_key} -> {value!r}'
+  )
   return float(value)
 
 
@@ -89,8 +93,8 @@ def _print_and_optionally_save_stats(config: DictConfig):
     timestamp_key = str(timestamp)
     payloads = _load_episode_payloads(_timestamp_dir(input_root, timestamp_key))
     stats[timestamp_key] = {
-        metric_name: _compute_mean(payloads, str(metric_name))
-        for metric_name in config.metrics
+      metric_name: _compute_mean(payloads, str(metric_name))
+      for metric_name in config.metrics
     }
   print(json.dumps(stats, indent=2, sort_keys=True))
   if config.stats.output_path is not None:
@@ -127,11 +131,11 @@ def _plot_series(config: DictConfig):
     ax.grid(True, alpha=0.3)
   else:
     fig, axes = plt.subplots(
-        nrows=len(series),
-        ncols=1,
-        figsize=(8, 3 * len(series)),
-        sharex=True,
-        sharey=True,
+      nrows=len(series),
+      ncols=1,
+      figsize=(8, 3 * len(series)),
+      sharex=True,
+      sharey=True,
     )
     axes = np.atleast_1d(axes)
     for ax, (label, (xs, ys)) in zip(axes, series.items(), strict=True):
@@ -146,14 +150,14 @@ def _plot_series(config: DictConfig):
     fig.suptitle(str(config.plot.title))
 
   fig.tight_layout()
-  fig.savefig(output_path)
+  fig.savefig(output_path, dpi=300)
   print(f'Saved plot to {output_path}')
 
 
 @hydra.main(
-    version_base=None,
-    config_path='conf',
-    config_name='planner_result_stats',
+  version_base=None,
+  config_path='conf',
+  config_name='planner_result_stats',
 )
 def main(config: DictConfig):
   """Run metric aggregation and plotting from a Hydra config."""
