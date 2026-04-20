@@ -1,4 +1,4 @@
-name: "qwen3.5-27b"
+name: "gpt-5.4"
 
 # call method
 use_openai_sdk: True
