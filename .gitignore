@@ -17,3 +17,6 @@ plots/**/*.png
 
 # Profiling
 analysis/
+
+# Miscellaneous
+run_gui.log
