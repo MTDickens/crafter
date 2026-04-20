@@ -197,8 +197,18 @@ skill_learning:
     enabled: true
     trigger_interval: 5
     patterns_per_trigger: 5
-    max_examples_in_prompt: 5
+
+    max_examples_in_prompt: 10
     max_examples_in_prompt_order: random # first, last, random
+
+    use_bounding_box: true # crop each map to the min bbox containing non-unknown cells
+
+    enable_tiling: false # split each map/bbox into overlapping tiles as examples before prompting
+    tile_size: [16, 16] # tile width and height, only used when enable_tiling=true
+    tile_overlap: [3, 3] # overlap width and height, only used when enable_tiling=true
+
+    include_tile_coordinates: false # include tile coordinates in the prompt metadata
+
     dummy_response_path: null
     # llm_cfg:
     #   use_openai_sdk: true

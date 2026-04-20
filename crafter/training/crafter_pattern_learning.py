@@ -11,7 +11,11 @@ import torch
 from omegaconf import DictConfig
 
 from crafter.skills.crafter_patterns import CrafterSkillLibrary, CrossShapedPattern
-from crafter.skills.crafter_proposal import propose_crafter_patterns_from_partial_maps
+from crafter.skills.crafter_proposal import (
+  CrafterProposalPromptExample,
+  build_crafter_proposal_prompt_examples,
+  propose_crafter_patterns_from_partial_maps,
+)
 from crafter.skills.crafter_weight_optimization import (
   CrafterTransitionExample,
   PositiveWeightCrafterSolver,
@@ -238,6 +242,7 @@ class CrafterSkillLearningManager:
       codec=self.codec,
       device=torch.device(str(cfg.device)),
     )
+    self._proposal_example_cache: dict[tuple, list[CrafterProposalPromptExample]] = {}
     self._initialize_patterns()
 
   def _initialize_patterns(self):
@@ -402,18 +407,13 @@ class CrafterSkillLearningManager:
   def _maybe_add_proposals(self, replay_entries: list[CrafterReplayEntry]) -> int:
     if not bool(self.cfg.skill_proposal.enabled):
       return 0
-    examples = replay_entries[: int(self.cfg.skill_proposal.max_examples_in_prompt)]
-    partial_maps = []
-    for replay_entry in examples:
-      partial = torch.full_like(
-        replay_entry.full_map_ids, fill_value=self.codec.unknown_id
-      )
-      partial[replay_entry.final_known_mask] = replay_entry.full_map_ids[
-        replay_entry.final_known_mask
-      ]
-      partial_maps.append(partial)
+    self._prune_proposal_example_cache(replay_entries)
+    prompt_examples: list[CrafterProposalPromptExample] = []
+    for replay_entry in replay_entries:
+      prompt_examples.extend(self._proposal_prompt_examples(replay_entry))
+    prompt_examples = self._select_prompt_examples(prompt_examples)
     proposed = propose_crafter_patterns_from_partial_maps(
-      partial_map_ids_examples=partial_maps,
+      prompt_examples=prompt_examples,
       codec=self.codec,
       skill_proposal_cfg=self.cfg.skill_proposal,
     )
@@ -421,3 +421,68 @@ class CrafterSkillLearningManager:
     for pattern in proposed[: int(self.cfg.skill_proposal.patterns_per_trigger)]:
       added += int(self.library.add_pattern(pattern))
     return added
+
+  def _proposal_partial_map(self, replay_entry: CrafterReplayEntry) -> torch.Tensor:
+    partial = torch.full_like(
+      replay_entry.full_map_ids, fill_value=self.codec.unknown_id
+    )
+    partial[replay_entry.final_known_mask] = replay_entry.full_map_ids[
+      replay_entry.final_known_mask
+    ]
+    return partial
+
+  def _proposal_cache_key(self, replay_entry: CrafterReplayEntry) -> tuple:
+    cfg = self.cfg.skill_proposal
+    return (
+      int(replay_entry.episode_index),
+      bool(cfg.use_bounding_box),
+      bool(cfg.enable_tiling),
+      tuple(int(value) for value in cfg.tile_size),
+      tuple(int(value) for value in cfg.tile_overlap),
+    )
+
+  def _proposal_prompt_examples(
+    self,
+    replay_entry: CrafterReplayEntry,
+  ) -> list[CrafterProposalPromptExample]:
+    cache_key = self._proposal_cache_key(replay_entry)
+    if cache_key not in self._proposal_example_cache:
+      self._proposal_example_cache[cache_key] = build_crafter_proposal_prompt_examples(
+        partial_map_ids=self._proposal_partial_map(replay_entry),
+        source_episode_index=int(replay_entry.episode_index),
+        codec=self.codec,
+        skill_proposal_cfg=self.cfg.skill_proposal,
+      )
+    return self._proposal_example_cache[cache_key]
+
+  def _prune_proposal_example_cache(
+    self,
+    replay_entries: list[CrafterReplayEntry],
+  ) -> None:
+    active_episode_indices = {int(entry.episode_index) for entry in replay_entries}
+    stale_keys = [
+      key for key in self._proposal_example_cache
+      if int(key[0]) not in active_episode_indices
+    ]
+    for key in stale_keys:
+      del self._proposal_example_cache[key]
+
+  def _select_prompt_examples(
+    self,
+    prompt_examples: list[CrafterProposalPromptExample],
+  ) -> list[CrafterProposalPromptExample]:
+    max_examples = int(self.cfg.skill_proposal.max_examples_in_prompt)
+    if max_examples <= 0 or len(prompt_examples) <= max_examples:
+      return prompt_examples
+    order = str(self.cfg.skill_proposal.max_examples_in_prompt_order)
+    if order == 'first':
+      return prompt_examples[:max_examples]
+    if order == 'last':
+      return prompt_examples[-max_examples:]
+    if order == 'random':
+      indices = self._rng.choice(len(prompt_examples), size=max_examples, replace=False)
+      return [prompt_examples[int(index)] for index in sorted(indices.tolist())]
+    raise AssertionError(
+      f'Unsupported max_examples_in_prompt_order: {order}. '
+      'Expected one of: first, last, random.'
+    )
