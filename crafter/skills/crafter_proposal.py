@@ -46,17 +46,23 @@ class CrafterProposalPromptExample:
 def partial_map_ids_to_prompt_block(
   partial_map_ids,
   codec: CrafterTileCodec,
+  token_case: str = 'lower',
 ) -> str:
   """Format one numeric partial map as prompt text."""
+  if token_case not in {'lower', 'upper'}:
+    raise AssertionError(
+      f'Unsupported prompt token case: {token_case}. Expected lower or upper.'
+    )
   rows = []
   for y in range(partial_map_ids.shape[1]):
     tokens = []
     for x in range(partial_map_ids.shape[0]):
       value = int(partial_map_ids[x, y])
       if value == codec.unknown_id:
-        tokens.append('UNKNOWN')
+        token = 'unknown'
       else:
-        tokens.append(codec.decode_material(value).upper())
+        token = codec.decode_material(value)
+      tokens.append(token if token_case == 'lower' else token.upper())
     rows.append(' '.join(tokens))
   return '\n'.join(rows)
 
@@ -168,6 +174,7 @@ def build_crafter_skill_proposal_prompt(
   codec: CrafterTileCodec,
   patterns_per_trigger: int,
   include_tile_coordinates: bool = False,
+  prompt_token_case: str = 'lower',
 ) -> str:
   """Build a single-shot prompt for proposing Crafter cross patterns."""
   rendered_examples = []
@@ -183,8 +190,17 @@ def build_crafter_skill_proposal_prompt(
       f'Example {index}\n'
       + '\n'.join(metadata)
       + '\n'
-      + partial_map_ids_to_prompt_block(example.partial_map_ids, codec)
+      + partial_map_ids_to_prompt_block(
+        example.partial_map_ids,
+        codec,
+        token_case=prompt_token_case,
+      )
     )
+  case_instruction = (
+    'Use only lowercase world-generation material names. Do not use unknown.'
+    if prompt_token_case == 'lower'
+    else 'Use only uppercase world-generation material names. Do not use UNKNOWN.'
+  )
   return (
     "You are given partially revealed Crafter material maps.\n"
     "Crafter is essentially 2D Minecraft; so also use that world knowledge to infer.\n"
@@ -193,7 +209,8 @@ def build_crafter_skill_proposal_prompt(
     'Return strict JSON only with shape '
     '{"patterns": [{"center": "...", "top": "...", "bottom": "...", '
     '"left": "...", "right": "..."}]}.\n'
-    'Use only world-generation material names. Do not use UNKNOWN.\n\n'
+    + case_instruction
+    + '\n\n'
     + '\n\n'.join(rendered_examples)
   )
 
@@ -218,13 +235,18 @@ def parse_crafter_skill_proposal_response(
   parsed: list[CrossShapedPattern] = []
   for raw_pattern in raw_patterns:
     try:
+      center = str(raw_pattern['center']).strip().lower()
+      top = str(raw_pattern['top']).strip().lower()
+      bottom = str(raw_pattern['bottom']).strip().lower()
+      left = str(raw_pattern['left']).strip().lower()
+      right = str(raw_pattern['right']).strip().lower()
       parsed.append(
         CrossShapedPattern(
-          center_id=codec.encode_material(raw_pattern['center']),
-          top_id=codec.encode_material(raw_pattern['top']),
-          bottom_id=codec.encode_material(raw_pattern['bottom']),
-          left_id=codec.encode_material(raw_pattern['left']),
-          right_id=codec.encode_material(raw_pattern['right']),
+          center_id=codec.encode_material(center),
+          top_id=codec.encode_material(top),
+          bottom_id=codec.encode_material(bottom),
+          left_id=codec.encode_material(left),
+          right_id=codec.encode_material(right),
         )
       )
     except Exception as exc:  # pragma: no cover - parser failures are input-dependent.
@@ -243,6 +265,7 @@ def propose_crafter_patterns_from_partial_maps(
     codec=codec,
     patterns_per_trigger=int(skill_proposal_cfg.patterns_per_trigger),
     include_tile_coordinates=bool(skill_proposal_cfg.include_tile_coordinates),
+    prompt_token_case=str(skill_proposal_cfg.prompt_token_case),
   )
   response_text = get_crafter_skill_proposal_text(skill_proposal_cfg, prompt)
   patterns = parse_crafter_skill_proposal_response(response_text, codec)
