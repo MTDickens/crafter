@@ -1,0 +1,181 @@
+defaults:
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+  - _self_
+
+asset_dir: crafter/assets
+output_path: plots/pattern_gallery/pattern_gallery.png
+
+tile_size: 32
+card_padding: 6
+label_height: 86
+columns: 4
+resolution_scale: 3
+font_size: 12
+background_rgba: [240, 240, 240, 255]
+
+initial_patterns:
+  add_center_only_placeholders: true
+  presets:
+    # Corrent Patterns
+    - center: grass
+      top: grass
+      bottom: grass
+      left: grass
+      right: grass
+    - center: tree
+      top: grass
+      bottom: grass
+      left: grass
+      right: grass
+    - center: stone
+      top: stone
+      bottom: stone
+      left: stone
+      right: stone
+    - center: coal
+      top: stone
+      bottom: stone
+      left: stone
+      right: stone
+    - center: iron
+      top: stone
+      bottom: stone
+      left: stone
+      right: stone
+    - center: diamond
+      top: stone
+      bottom: stone
+      left: stone
+      right: stone
+    # Wrong Patterns Main
+    - center: grass
+      top: stone
+      bottom: stone
+      left: stone
+      right: stone
+    - center: tree
+      top: stone
+      bottom: stone
+      left: stone
+      right: stone
+    - center: stone
+      top: grass
+      bottom: grass
+      left: grass
+      right: grass
+    - center: coal
+      top: grass
+      bottom: grass
+      left: grass
+      right: grass
+    - center: iron
+      top: grass
+      bottom: grass
+      left: grass
+      right: grass
+    - center: diamond
+      top: grass
+      bottom: grass
+      left: grass
+      right: grass
+    # Wrong Patterns Alter 1
+    - center: grass
+      top: stone
+      bottom: stone
+      left: path
+      right: path
+    - center: tree
+      top: grass
+      bottom: stone
+      left: grass
+      right: stone
+    - center: stone
+      top: grass
+      bottom: grass
+      left: path
+      right: path
+    - center: coal
+      top: grass
+      bottom: stone
+      left: stone
+      right: grass
+    - center: iron
+      top: path
+      bottom: grass
+      left: grass
+      right: path
+    - center: diamond
+      top: stone
+      bottom: stone
+      left: grass
+      right: grass
+    # Wrong Patterns Alter 2
+    - center: grass
+      top: stone
+      bottom: stone
+      left: grass
+      right: path
+    - center: tree
+      top: path
+      bottom: stone
+      left: grass
+      right: stone
+    - center: stone
+      top: grass
+      bottom: grass
+      left: sand
+      right: path
+    - center: coal
+      top: grass
+      bottom: sand
+      left: stone
+      right: grass
+    - center: iron
+      top: water
+      bottom: grass
+      left: grass
+      right: path
+    - center: diamond
+      top: stone
+      bottom: lava
+      left: grass
+      right: grass
+    # Wrong Patterns Alter 3
+    - center: grass
+      top: lava
+      bottom: stone
+      left: grass
+      right: path
+    - center: tree
+      top: path
+      bottom: sand
+      left: grass
+      right: stone
+    - center: stone
+      top: grass
+      bottom: water
+      left: sand
+      right: path
+    - center: coal
+      top: grass
+      bottom: sand
+      left: stone
+      right: water
+    - center: iron
+      top: water
+      bottom: grass
+      left: sand
+      right: path
+    - center: diamond
+      top: stone
+      bottom: lava
+      left: grass
+      right: path
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  job:
+    chdir: false
