@@ -411,9 +411,9 @@ class CrafterSkillLearningManager:
     prompt_examples: list[CrafterProposalPromptExample] = []
     for replay_entry in replay_entries:
       prompt_examples.extend(self._proposal_prompt_examples(replay_entry))
-    prompt_examples = self._select_prompt_examples(prompt_examples)
+    selected_prompt_examples = self._select_prompt_examples(prompt_examples)
     proposed = propose_crafter_patterns_from_partial_maps(
-      prompt_examples=prompt_examples,
+      prompt_examples=selected_prompt_examples,
       codec=self.codec,
       skill_proposal_cfg=self.cfg.skill_proposal,
     )
