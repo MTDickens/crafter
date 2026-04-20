@@ -368,7 +368,7 @@ class CrafterSkillLearningManager:
     self,
     examples: list[CrafterTransitionExample],
   ) -> list[CrafterTransitionExample]:
-    """Select the training subset implied by ``max_example_learned``.
+    """Select the training subset implied by ``max_examples_learned``.
 
     Parameters
     ----------
@@ -379,23 +379,23 @@ class CrafterSkillLearningManager:
     -------
     list[CrafterTransitionExample]
         Selected example subset. ``replay_buffer.capacity`` controls how many
-        episodes are stored; ``max_example_learned`` only controls how many
+        episodes are stored; ``max_examples_learned`` only controls how many
         expanded transition examples are used for one training run.
     """
-    max_example_learned = int(self.cfg.max_example_learned)
-    if max_example_learned <= 0 or len(examples) <= max_example_learned:
+    max_examples_learned = int(self.cfg.max_examples_learned)
+    if max_examples_learned <= 0 or len(examples) <= max_examples_learned:
       return examples
 
-    order = str(self.cfg.max_example_learned_order)
+    order = str(self.cfg.max_examples_learned_order)
     if order == 'first':
-      return examples[:max_example_learned]
+      return examples[:max_examples_learned]
     if order == 'last':
-      return examples[-max_example_learned:]
+      return examples[-max_examples_learned:]
     if order == 'random':
-      indices = self._rng.choice(len(examples), size=max_example_learned, replace=False)
+      indices = self._rng.choice(len(examples), size=max_examples_learned, replace=False)
       return [examples[int(index)] for index in sorted(indices.tolist())]
     raise AssertionError(
-      f'Unsupported max_example_learned_order: {order}. '
+      f'Unsupported max_examples_learned_order: {order}. '
       'Expected one of: first, last, random.'
     )
 

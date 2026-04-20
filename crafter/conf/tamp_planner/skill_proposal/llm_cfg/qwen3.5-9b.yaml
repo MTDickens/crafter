@@ -1,0 +1,15 @@
+name: "qwen3.5-9b"
+
+# call method
+use_openai_sdk: True
+api_type: completion # completion or response
+
+## OpenRouter
+api_key: ${oc.env:OPENROUTER_API_KEY}
+base_url: http://localhost:8000/v1
+model_name: Qwen/Qwen3.5-9B
+model_provider: alibaba
+
+# generation parameters
+max_completion_tokens: 3000
+temperature: 0.0

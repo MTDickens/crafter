@@ -13,7 +13,7 @@ planner_results/
 planner_results_260419/
 
 # Plots
-plots/*.png
+plots/**/*.png
 
 # Profiling
 analysis/

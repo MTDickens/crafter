@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Crafter GUI",
+            "type": "debugpy",
+            "request": "launch",
+            // Equivalent to: python -m crafter.run_gui (pick the uv-managed interpreter, e.g. .venv)
+            "module": "crafter.run_gui",
+            "console": "integratedTerminal"
+            // Optional (if you use `uv venv` -> .venv):
+            // "python": "${workspaceFolder}/.venv/bin/python"
+        }
+    ]
+}
