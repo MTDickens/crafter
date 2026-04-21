@@ -195,8 +195,8 @@ skill_learning:
 
   skill_proposal:
     enabled: true
-    trigger_interval: 1
-    patterns_per_trigger: 5
+    trigger_interval: 5
+    patterns_per_trigger: 10
 
     max_examples_in_prompt: 10
     max_examples_in_prompt_order: random # first, last, random
@@ -208,6 +208,7 @@ skill_learning:
     tile_overlap: [3, 3] # overlap width and height, only used when enable_tiling=true
 
     include_tile_coordinates: false # include tile coordinates in the prompt metadata
+    prompt_token_case: lower # lower or upper, only affects prompt rendering
 
     dummy_response_path: null
     # llm_cfg:
