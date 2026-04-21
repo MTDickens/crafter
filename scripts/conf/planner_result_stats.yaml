@@ -13,11 +13,13 @@ timestamps:
   # - 20260419T021030
   # - 20260419T023525
   # - 20260419T025702
-  - 20260419T175547
-  - 20260419T180448
-  - 20260419T185828
-  - 20260419T185853
+  # - 20260419T175547
+  # - 20260419T180448
+  # - 20260419T185828
+  # - 20260419T185853
   - 20260419T203915
+  - 20260421T014620
+  - 20260421T020539
 
 metrics:
   - metrics.reveal_count
@@ -28,21 +30,79 @@ stats:
   output_path: null
 
 plot:
+  # Selection
   enabled: true
   metric: metrics.reveal_count
   layout: same_axes # same_axes or separate_axes
+
+  # Matplotlib / output
   title: Planner Result Metric by Episode
   output_path: plots/planner_result_stats_250419.png
 
 pattern_library:
+  # Selection / export
   enabled: false
   output_path: null
   weight_field: positive_weight # raw_weight or positive_weight
+
   plot:
+    # Selection
     enabled: true
+    use_selected_patterns: true # false -> plot all logged patterns; true -> filter to patterns below
+    add_center_only_placeholders: false # whether to also track ungated placeholder patterns
+
+    # These are only the patterns to TRACK/DRAW in the stats plot below.
+    # They do not initialize the planner library; that lives in
+    # crafter/conf/tamp_planner/pattern_learning.yaml under planner.skill_learning.initial_patterns.
+    selected_patterns:
+      - center: grass
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      - center: tree
+        top: grass
+        bottom: grass
+        left: grass
+        right: grass
+      - center: stone
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: coal
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: iron
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+      - center: diamond
+        top: stone
+        bottom: stone
+        left: stone
+        right: stone
+
+    # Plot behavior
+    draw_patterns: false # render selected pattern cards next to each timestamp subplot
+    mark_first_appearance: true # add a same-color dot where a selected pattern first appears
+    yscale: linear # linear or log
+
+    # Matplotlib / output
     title: Pattern Weights by Episode
     output_path: plots/pattern_learning_weights_250419.png
-    yscale: linear # linear or log
+
+    # Pattern-card rendering
+    asset_dir: crafter/assets
+    tile_size: 32
+    card_padding: 6
+    label_height: 86
+    resolution_scale: 2
+    font_size: 12
+    background_rgba: [240, 240, 240, 255]
 
 hydra:
   run:

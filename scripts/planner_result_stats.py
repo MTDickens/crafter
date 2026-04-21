@@ -18,6 +18,21 @@ import hydra
 import matplotlib.pyplot as plt
 import numpy as np
 from omegaconf import DictConfig
+from PIL import Image, ImageDraw, ImageFont
+
+
+_PLACEHOLDER_MATERIALS = (
+  'water',
+  'grass',
+  'stone',
+  'path',
+  'sand',
+  'tree',
+  'lava',
+  'coal',
+  'iron',
+  'diamond',
+)
 
 
 def _episode_dirs(timestamp_dir: Path) -> list[Path]:
@@ -128,6 +143,191 @@ def _collect_pattern_histories(
       'pattern_weights': pattern_weights,
     }
   return histories
+
+
+def _pattern_spec_from_mapping(mapping, kind: str) -> dict[str, object]:
+  center = str(mapping.center)
+  top = getattr(mapping, 'top', None)
+  bottom = getattr(mapping, 'bottom', None)
+  left = getattr(mapping, 'left', None)
+  right = getattr(mapping, 'right', None)
+  if top is None or bottom is None or left is None or right is None:
+    return {
+      'kind': kind,
+      'center': center,
+      'top': 'unknown',
+      'bottom': 'unknown',
+      'left': 'unknown',
+      'right': 'unknown',
+      'pattern_key': f'ungated:center={center}',
+      'label_lines': [
+        kind,
+        f'center={center}',
+        'top=unknown',
+        'bottom=unknown',
+        'left=unknown',
+        'right=unknown',
+      ],
+    }
+  top = str(top)
+  bottom = str(bottom)
+  left = str(left)
+  right = str(right)
+  return {
+    'kind': kind,
+    'center': center,
+    'top': top,
+    'bottom': bottom,
+    'left': left,
+    'right': right,
+    'pattern_key': (
+      f'gated:center={center},top={top},bottom={bottom},left={left},right={right}'
+    ),
+    'label_lines': [
+      f'center={center}',
+      f'top={top}',
+      f'bottom={bottom}',
+      f'left={left}',
+      f'right={right}',
+    ],
+  }
+
+
+def _selected_pattern_specs(config: DictConfig) -> list[dict[str, object]]:
+  if not bool(config.pattern_library.plot.use_selected_patterns):
+    return []
+  specs = [_pattern_spec_from_mapping(pattern, kind='selected') for pattern in config.pattern_library.plot.selected_patterns]
+  if bool(config.pattern_library.plot.add_center_only_placeholders):
+    specs = [
+      _pattern_spec_from_mapping(type('M', (), {'center': material})(), kind='placeholder')
+      for material in _PLACEHOLDER_MATERIALS
+    ] + specs
+  return specs
+
+
+def _filter_pattern_histories(
+    config: DictConfig,
+    histories: dict[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+  selected = _selected_pattern_specs(config)
+  if not selected:
+    return histories
+  selected_by_key = {pattern['pattern_key']: pattern for pattern in selected}
+  filtered = {}
+  for timestamp, payload in histories.items():
+    kept_weights = {}
+    kept_metadata = {}
+    for pattern_key, weights in payload['pattern_weights'].items():
+      if pattern_key not in selected_by_key:
+        continue
+      if not np.isfinite(weights).any():
+        continue
+      kept_weights[pattern_key] = weights
+      kept_metadata[pattern_key] = {
+        **payload['pattern_metadata'][pattern_key],
+        'label_lines': selected_by_key[pattern_key]['label_lines'],
+      }
+    filtered[timestamp] = {
+      'episode_indices': payload['episode_indices'],
+      'pattern_metadata': kept_metadata,
+      'pattern_weights': kept_weights,
+    }
+  return filtered
+
+
+def _pattern_colors(count: int) -> list[tuple[float, float, float, float]]:
+  cmap_name = 'tab20' if count <= 20 else 'hsv'
+  cmap = plt.get_cmap(cmap_name, count)
+  return [cmap(index) for index in range(count)]
+
+
+def _rgba255(color: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
+  return tuple(int(round(channel * 255.0)) for channel in color)
+
+
+def _load_font(font_size: int) -> ImageFont.ImageFont:
+  for font_name in (
+      'DejaVuSans.ttf',
+      '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+      '/System/Library/Fonts/Supplemental/Arial.ttf',
+  ):
+    try:
+      return ImageFont.truetype(font_name, font_size)
+    except OSError:
+      continue
+  return ImageFont.load_default()
+
+
+def _asset_image(asset_dir: Path, name: str, tile_size: int) -> Image.Image:
+  path = asset_dir / f'{name}.png'
+  assert path.exists(), f'Missing asset image: {path}'
+  image = Image.open(path).convert('RGBA')
+  return image.resize((tile_size, tile_size), resample=Image.NEAREST)
+
+
+def _render_pattern_card(
+    asset_dir: Path,
+    pattern: dict[str, object],
+    tile_size: int,
+    card_padding: int,
+    label_height: int,
+    font_size: int,
+    outline_rgba: tuple[int, int, int, int],
+) -> Image.Image:
+  card_size = tile_size * 3 + card_padding * 2
+  card = Image.new('RGBA', (card_size, card_size + label_height), (255, 255, 255, 255))
+  draw = ImageDraw.Draw(card)
+  font = _load_font(font_size)
+  origin = card_padding
+  positions = {
+    'top': (origin + tile_size, origin),
+    'left': (origin, origin + tile_size),
+    'center': (origin + tile_size, origin + tile_size),
+    'right': (origin + tile_size * 2, origin + tile_size),
+    'bottom': (origin + tile_size, origin + tile_size * 2),
+  }
+  for key, pos in positions.items():
+    tile = _asset_image(asset_dir, str(pattern[key]), tile_size)
+    card.alpha_composite(tile, pos)
+  draw.rectangle((0, 0, card_size - 1, card_size - 1), outline=outline_rgba, width=2)
+  label_y = card_size + 2
+  for line in pattern['label_lines']:
+    draw.text((card_padding, label_y), str(line), fill=(0, 0, 0, 255), font=font)
+    bbox = draw.textbbox((card_padding, label_y), str(line), font=font)
+    label_y += (bbox[3] - bbox[1]) + 2
+  return card
+
+
+def _render_pattern_cards_strip(
+    config: DictConfig,
+    pattern_order: list[str],
+    metadata_by_key: dict[str, dict],
+    colors: list[tuple[float, float, float, float]],
+) -> Image.Image:
+  asset_dir = Path(config.pattern_library.plot.asset_dir).resolve()
+  resolution_scale = int(config.pattern_library.plot.resolution_scale)
+  tile_size = int(config.pattern_library.plot.tile_size) * resolution_scale
+  card_padding = int(config.pattern_library.plot.card_padding) * resolution_scale
+  label_height = int(config.pattern_library.plot.label_height) * resolution_scale
+  font_size = int(config.pattern_library.plot.font_size) * resolution_scale
+  background_rgba = tuple(config.pattern_library.plot.background_rgba)
+  cards = [
+    _render_pattern_card(
+      asset_dir=asset_dir,
+      pattern=metadata_by_key[pattern_key],
+      tile_size=tile_size,
+      card_padding=card_padding,
+      label_height=label_height,
+      font_size=font_size,
+      outline_rgba=_rgba255(color),
+    )
+    for pattern_key, color in zip(pattern_order, colors, strict=True)
+  ]
+  card_width, card_height = cards[0].size
+  strip = Image.new('RGBA', (len(cards) * card_width, card_height), background_rgba)
+  for index, card in enumerate(cards):
+    strip.alpha_composite(card, (index * card_width, 0))
+  return strip.convert('RGB')
 
 
 def _pattern_histories_jsonable(histories: dict[str, dict[str, object]]) -> dict:
@@ -241,7 +441,7 @@ def _print_and_optionally_save_pattern_library(config: DictConfig):
 def _plot_pattern_library(config: DictConfig):
   if not bool(config.pattern_library.plot.enabled):
     return
-  histories = _collect_pattern_histories(config)
+  histories = _filter_pattern_histories(config, _collect_pattern_histories(config))
   output_path = Path(config.pattern_library.plot.output_path).resolve()
   output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -265,18 +465,71 @@ def _plot_pattern_library(config: DictConfig):
   if yscale == 'log':
     assert global_ymin > 0.0, 'Log-scale pattern plots require strictly positive weights.'
 
-  fig, axes = plt.subplots(
-    nrows=len(histories),
-    ncols=1,
-    figsize=(10, 4 * len(histories)),
-    sharex=True,
-    sharey=True,
-  )
+  draw_patterns = bool(config.pattern_library.plot.draw_patterns)
+  if draw_patterns:
+    fig, axes = plt.subplots(
+      nrows=len(histories),
+      ncols=2,
+      figsize=(14, 4 * len(histories)),
+      gridspec_kw={'width_ratios': [1.7, 3.0]},
+      sharey=False,
+    )
+    axes = np.atleast_2d(axes)
+  else:
+    fig, axes = plt.subplots(
+      nrows=len(histories),
+      ncols=1,
+      figsize=(10, 4 * len(histories)),
+      sharex=True,
+      sharey=True,
+    )
+    axes = np.atleast_1d(axes)
+
+  mark_first_appearance = bool(config.pattern_library.plot.mark_first_appearance)
   axes = np.atleast_1d(axes)
-  for ax, (timestamp, payload) in zip(axes, histories.items(), strict=True):
+  for axis_entry, (timestamp, payload) in zip(axes, histories.items(), strict=True):
+    if draw_patterns:
+      card_ax, ax = axis_entry
+    else:
+      ax = axis_entry
     xs = payload['episode_indices']
-    for pattern_key, weights in payload['pattern_weights'].items():
-      ax.plot(xs, weights, marker='o', linewidth=1, markersize=2, label=pattern_key)
+    pattern_order = list(payload['pattern_weights'])
+    colors = _pattern_colors(len(pattern_order))
+    if draw_patterns:
+      if pattern_order:
+        card_image = _render_pattern_cards_strip(
+          config,
+          pattern_order,
+          payload['pattern_metadata'],
+          colors,
+        )
+        card_ax.imshow(card_image)
+      else:
+        card_ax.text(0.5, 0.5, 'No selected patterns appeared.', ha='center', va='center')
+      card_ax.axis('off')
+      card_ax.set_title(f'{timestamp} patterns')
+    for pattern_key, color in zip(pattern_order, colors, strict=True):
+      weights = payload['pattern_weights'][pattern_key]
+      ax.plot(
+        xs,
+        weights,
+        color=color,
+        marker='o',
+        linewidth=1.5,
+        markersize=3,
+        label=pattern_key,
+      )
+      if mark_first_appearance:
+        finite_indices = np.flatnonzero(np.isfinite(weights))
+        if finite_indices.size > 0:
+          first_index = int(finite_indices[0])
+          ax.scatter(
+            [xs[first_index]],
+            [weights[first_index]],
+            color=color,
+            s=45,
+            zorder=4,
+          )
     ax.set_xlim(global_xmin, global_xmax)
     ax.set_ylim(global_ymin, global_ymax)
     ax.set_yscale(yscale)
@@ -284,7 +537,10 @@ def _plot_pattern_library(config: DictConfig):
     ax.set_title(timestamp)
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=6, loc='upper left', bbox_to_anchor=(1.01, 1.0))
-  axes[-1].set_xlabel('Episode Index')
+  if draw_patterns:
+    axes[-1, 1].set_xlabel('Episode Index')
+  else:
+    axes[-1].set_xlabel('Episode Index')
   fig.suptitle(str(config.pattern_library.plot.title))
   fig.tight_layout()
   fig.savefig(output_path, dpi=300, bbox_inches='tight')
