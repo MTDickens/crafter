@@ -203,7 +203,7 @@ skill_learning:
 
     use_bounding_box: true # crop each map to the min bbox containing non-unknown cells
 
-    enable_tiling: false # split each map/bbox into overlapping tiles as examples before prompting
+    enable_tiling: true # split each map/bbox into overlapping tiles as examples before prompting
     tile_size: [15, 15] # tile width and height, only used when enable_tiling=true
     tile_overlap: [3, 3] # overlap width and height, only used when enable_tiling=true
 
