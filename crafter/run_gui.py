@@ -343,6 +343,14 @@ def _save_known_world_snapshot(episode_dir: pathlib.Path, snapshot_name: str, kn
   Image.fromarray(image).save(image_dir / f'{snapshot_name}.png')
 
 
+def _save_final_full_map(episode_dir: pathlib.Path, env_recorded):
+  image_dir = episode_dir / 'known_world_images'
+  image_dir.mkdir(parents=True, exist_ok=True)
+  known_mask = np.ones(env_recorded._world.area, dtype=bool)
+  image = _render_known_world_image(env_recorded, known_mask)
+  Image.fromarray(image).save(image_dir / 'final-full-map.png')
+
+
 def _flush_task_snapshots(pending_snapshots: dict[int, list], action_count: int, episode_dir: pathlib.Path, env_recorded):
   for snapshot_name, known_mask in pending_snapshots.pop(action_count, []):
     _save_known_world_snapshot(episode_dir, snapshot_name, known_mask, env_recorded)
@@ -684,6 +692,9 @@ def _run_single_episode(
     )
 
   if planner_trace is not None:
+    if config.planner.render_final_full_map:
+      assert episode_dir is not None, 'Final full-map rendering requires an episode output directory.'
+      _save_final_full_map(episode_dir, env_recorded)
     _write_planner_results(
         episode_dir,
         _planner_result_payload(

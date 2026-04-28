@@ -44,6 +44,7 @@ planner:
   output_dir: planner_results_260419
   plan_only: true
   render_known_world: none # none, task, step (not implemented)
+  render_final_full_map: true
   result_logging:
     - reveal_count
   task_order:
