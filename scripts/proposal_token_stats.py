@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import hydra
@@ -17,7 +18,39 @@ _QWEN3_VL_TOKENIZER = 'Qwen/Qwen3-VL-235B-A22B-Instruct'
 _PROPOSAL_DIR_RE = re.compile(r'^after-episode-(\d+)$')
 
 
-def _gpt54_counter() -> Callable[[str], int]:
+@dataclass(frozen=True)
+class TokenCounts:
+  """Token accounting for one proposal side."""
+
+  content_tokens: int
+  framing_tokens: int
+
+  @property
+  def total_tokens(self) -> int:
+    return self.content_tokens + self.framing_tokens
+
+
+@dataclass(frozen=True)
+class ProposalTokenCounter:
+  """Model-specific token accounting for saved proposal logs."""
+
+  model: str
+  tokenizer_name: str
+  count_input: Callable[[str], TokenCounts]
+  count_output: Callable[[str], TokenCounts]
+
+
+def _openrouter_prompt_message(role: str, content: str) -> str:
+  """Serialize one prompt-side OpenRouter chat message for token accounting."""
+  return f'role: {role}\ncontent:\n{content}'
+
+
+def _openrouter_completion_message(role: str, content: str) -> str:
+  """Serialize one completion-side OpenRouter chat message for token accounting."""
+  return f'role: {role}\n{content}'
+
+
+def _gpt54_counter() -> ProposalTokenCounter:
   try:
     import tiktoken  # noqa: PLC0415
   except ImportError as exc:
@@ -26,10 +59,34 @@ def _gpt54_counter() -> Callable[[str], int]:
       'Install it in this environment, for example: `uv add tiktoken`.'
     ) from exc
   encoding = tiktoken.encoding_for_model('gpt-5-4')
-  return lambda text: len(encoding.encode(text))
+
+  def count_input(text: str) -> TokenCounts:
+    content_tokens = len(encoding.encode(text))
+    message_tokens = len(encoding.encode(_openrouter_prompt_message('user', text)))
+    return TokenCounts(
+      content_tokens=content_tokens,
+      framing_tokens=message_tokens - content_tokens,
+    )
+
+  def count_output(text: str) -> TokenCounts:
+    content_tokens = len(encoding.encode(text))
+    message_tokens = len(encoding.encode(
+      _openrouter_completion_message('assistant', text)
+    ))
+    return TokenCounts(
+      content_tokens=content_tokens,
+      framing_tokens=message_tokens - content_tokens,
+    )
+
+  return ProposalTokenCounter(
+    model='gpt-5.4',
+    tokenizer_name=encoding.name,
+    count_input=count_input,
+    count_output=count_output,
+  )
 
 
-def _qwen3_vl_counter() -> Callable[[str], int]:
+def _qwen3_vl_counter() -> ProposalTokenCounter:
   try:
     from transformers import AutoTokenizer  # noqa: PLC0415
   except ImportError as exc:
@@ -48,10 +105,28 @@ def _qwen3_vl_counter() -> Callable[[str], int]:
       'Make sure the tokenizer is cached locally or this environment can '
       'download it from Hugging Face.'
     ) from exc
-  return lambda text: len(tokenizer.encode(text, add_special_tokens=False))
+
+  def count_input(text: str) -> TokenCounts:
+    return TokenCounts(
+      content_tokens=len(tokenizer.encode(text, add_special_tokens=False)),
+      framing_tokens=0,
+    )
+
+  def count_output(text: str) -> TokenCounts:
+    return TokenCounts(
+      content_tokens=len(tokenizer.encode(text, add_special_tokens=False)),
+      framing_tokens=0,
+    )
+
+  return ProposalTokenCounter(
+    model='qwen3_vl',
+    tokenizer_name=_QWEN3_VL_TOKENIZER,
+    count_input=count_input,
+    count_output=count_output,
+  )
 
 
-def _token_counter(model: str) -> Callable[[str], int]:
+def _token_counter(model: str) -> ProposalTokenCounter:
   if model == 'gpt-5.4':
     return _gpt54_counter()
   if model == 'qwen3_vl':
@@ -93,19 +168,23 @@ def _complete_proposal_dirs(timestamp_dir: Path) -> list[Path]:
 def _proposal_record(
     timestamp: str,
     proposal_dir: Path,
-    count_tokens: Callable[[str], int],
+    counter: ProposalTokenCounter,
 ) -> dict:
   input_text = (proposal_dir / 'input.txt').read_text()
   output_text = (proposal_dir / 'output.txt').read_text()
-  input_tokens = int(count_tokens(input_text))
-  output_tokens = int(count_tokens(output_text))
+  input_counts = counter.count_input(input_text)
+  output_counts = counter.count_output(output_text)
   return {
     'timestamp': timestamp,
     'proposal_dir': str(proposal_dir),
     'episode_index': _proposal_episode_index(proposal_dir),
-    'input_tokens': input_tokens,
-    'output_tokens': output_tokens,
-    'total_tokens': input_tokens + output_tokens,
+    'input_content_tokens': input_counts.content_tokens,
+    'input_framing_tokens': input_counts.framing_tokens,
+    'input_tokens': input_counts.total_tokens,
+    'output_content_tokens': output_counts.content_tokens,
+    'output_framing_tokens': output_counts.framing_tokens,
+    'output_tokens': output_counts.total_tokens,
+    'total_tokens': input_counts.total_tokens + output_counts.total_tokens,
   }
 
 
@@ -130,20 +209,26 @@ def _summary(records: list[dict], timestamp: str) -> dict:
 def _collect_stats(config: DictConfig) -> dict:
   input_root = Path(config.input_root).resolve()
   model = str(config.model)
-  count_tokens = _token_counter(model)
+  counter = _token_counter(model)
   timestamp_summaries = []
   proposal_records = []
   for timestamp_value in config.timestamps:
     timestamp = str(timestamp_value)
     timestamp_records = [
-      _proposal_record(timestamp, proposal_dir, count_tokens)
+      _proposal_record(timestamp, proposal_dir, counter)
       for proposal_dir in _complete_proposal_dirs(_timestamp_dir(input_root, timestamp))
     ]
     timestamp_summaries.append(_summary(timestamp_records, timestamp))
     proposal_records.extend(timestamp_records)
   return {
     'model': model,
+    'tokenizer_name': counter.tokenizer_name,
     'input_root': str(input_root),
+    'counting_mode': (
+      'openai_compatible_chat_completions'
+      if model == 'gpt-5.4'
+      else 'raw_text'
+    ),
     'timestamp_summaries': timestamp_summaries,
     'overall_summary': _summary(proposal_records, 'OVERALL'),
     'proposal_records': proposal_records,
