@@ -15,6 +15,7 @@ from crafter.known_world import KnownWorld, SimpleWorld
 from crafter.skills.crafter_patterns import CrafterSkillLibrary
 from crafter.training.crafter_pattern_learning import CrafterSkillLearningManager
 from crafter.task_and_motion_planner import TaskAndMotionPlanner
+from crafter.utils.crafter_codec import CrafterTileCodec
 
 
 def _print_actions(keymap):
@@ -276,7 +277,7 @@ def _make_pattern_learning_replay_payload(
   """Serialize one replay entry for parent-process aggregation."""
   return {
       'full_map_ids': codec.encode_simple_world(known_world.initial_world, device='cpu').numpy(),
-      'final_known_mask': known_world.known_mask,
+      'final_known_mask': known_world.perceived_mask,
       'start_pos': tuple(start_pos),
       'episode_index': int(episode_index),
       'seed': seed,
@@ -351,6 +352,77 @@ def _save_final_full_map(episode_dir: pathlib.Path, env_recorded):
   Image.fromarray(image).save(image_dir / 'final-full-map.png')
 
 
+def _map_ids_to_text(map_ids: np.ndarray, codec: CrafterTileCodec) -> str:
+  rows = []
+  for y in range(map_ids.shape[1]):
+    tokens = []
+    for x in range(map_ids.shape[0]):
+      value = int(map_ids[x, y])
+      if value == codec.unknown_id:
+        tokens.append('unknown')
+      else:
+        tokens.append(codec.decode_material(value))
+    rows.append(' '.join(tokens))
+  return '\n'.join(rows) + '\n'
+
+
+def _save_planner_map_artifacts(
+    episode_dir: pathlib.Path | None,
+    known_world: KnownWorld | None,
+    codec: CrafterTileCodec,
+) -> dict | None:
+  if episode_dir is None or known_world is None:
+    return None
+  map_dir = episode_dir / 'maps'
+  map_dir.mkdir(parents=True, exist_ok=True)
+  ground_truth_ids = (
+      codec.encode_simple_world(known_world.initial_world, device='cpu')
+      .detach()
+      .cpu()
+      .numpy()
+  )
+  perceived_mask = known_world.perceived_mask
+  imputed_mask = known_world.imputed_mask
+  total_mask = known_world.known_mask
+  perceived_ids = np.full_like(ground_truth_ids, fill_value=codec.unknown_id)
+  imputed_ids = np.full_like(ground_truth_ids, fill_value=codec.unknown_id)
+  total_ids = np.full_like(ground_truth_ids, fill_value=codec.unknown_id)
+  perceived_ids[perceived_mask] = ground_truth_ids[perceived_mask]
+  total_ids[perceived_mask] = ground_truth_ids[perceived_mask]
+  for x, y in zip(*np.nonzero(imputed_mask), strict=True):
+    pos = (int(x), int(y))
+    material_id = codec.encode_material(known_world.imputed_material_at(pos))
+    imputed_ids[pos] = material_id
+    total_ids[pos] = material_id
+  np.savez_compressed(
+      map_dir / 'maps.npz',
+      ground_truth_ids=ground_truth_ids,
+      perceived_ids=perceived_ids,
+      perceived_mask=perceived_mask,
+      imputed_ids=imputed_ids,
+      imputed_mask=imputed_mask,
+      total_ids=total_ids,
+      total_mask=total_mask,
+      materials=np.array(codec.materials),
+      unknown_id=np.array(codec.unknown_id, dtype=np.int64),
+  )
+  text_maps = {
+      'ground_truth': ground_truth_ids,
+      'perceived': perceived_ids,
+      'imputed': imputed_ids,
+      'total': total_ids,
+  }
+  for name, map_ids in text_maps.items():
+    (map_dir / f'{name}.txt').write_text(_map_ids_to_text(map_ids, codec))
+  return {
+      'npz': 'maps/maps.npz',
+      'ground_truth_text': 'maps/ground_truth.txt',
+      'perceived_text': 'maps/perceived.txt',
+      'imputed_text': 'maps/imputed.txt',
+      'total_text': 'maps/total.txt',
+  }
+
+
 def _flush_task_snapshots(pending_snapshots: dict[int, list], action_count: int, episode_dir: pathlib.Path, env_recorded):
   for snapshot_name, known_mask in pending_snapshots.pop(action_count, []):
     _save_known_world_snapshot(episode_dir, snapshot_name, known_mask, env_recorded)
@@ -378,6 +450,7 @@ def _pattern_learning_library_payload(
   codec = skill_learning_manager.codec
   positive_weights = library.positive_weights().detach().cpu().tolist()
   raw_weights = library.raw_weights.detach().cpu().tolist()
+  positive_weight_sum = float(sum(float(value) for value in positive_weights))
   patterns = []
   for index, pattern in enumerate(library.patterns):
     center = codec.decode_material(pattern.center_id)
@@ -402,6 +475,7 @@ def _pattern_learning_library_payload(
         'right': right,
         'raw_weight': float(raw_weights[index]),
         'positive_weight': float(positive_weights[index]),
+        'normalized_weight': float(positive_weights[index]) / positive_weight_sum,
     })
   return {
       'num_patterns': len(patterns),
@@ -415,6 +489,7 @@ def _planner_result_payload(
     episode_index: int,
     executed_summary: dict | None,
     skill_learning_manager: CrafterSkillLearningManager | None = None,
+    map_paths: dict | None = None,
 ):
   payload = {
       'episode_index': episode_index,
@@ -427,6 +502,8 @@ def _planner_result_payload(
   pattern_learning_library = _pattern_learning_library_payload(skill_learning_manager)
   if pattern_learning_library is not None:
     payload['pattern_learning_library'] = pattern_learning_library
+  if map_paths is not None:
+    payload['map_paths'] = map_paths
   if executed_summary is not None:
     payload.update(executed_summary)
   return payload
@@ -695,6 +772,12 @@ def _run_single_episode(
     if config.planner.render_final_full_map:
       assert episode_dir is not None, 'Final full-map rendering requires an episode output directory.'
       _save_final_full_map(episode_dir, env_recorded)
+    codec = (
+        local_skill_learning_manager.codec
+        if local_skill_learning_manager is not None
+        else CrafterTileCodec.for_worldgen_materials()
+    )
+    map_paths = _save_planner_map_artifacts(episode_dir, known_world, codec)
     _write_planner_results(
         episode_dir,
         _planner_result_payload(
@@ -703,6 +786,7 @@ def _run_single_episode(
             episode_index,
             execution_summary,
             skill_learning_manager=local_skill_learning_manager,
+            map_paths=map_paths,
         ),
     )
   if config.planner.enabled and config.planner.name == 'pattern_learning':
@@ -790,6 +874,7 @@ def main(config: DictConfig):
   skill_learning_manager = None
   if config.planner.enabled and config.planner.name == 'pattern_learning':
     skill_learning_manager = CrafterSkillLearningManager(config.planner.skill_learning)
+    skill_learning_manager.proposal_output_root = output_root
   if config.headless:
     config_dict = OmegaConf.to_container(config, resolve=True)
     if config.workers == 1:

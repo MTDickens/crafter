@@ -1,7 +1,7 @@
 # @package planner
 
 defaults:
-  - skill_proposal/llm_cfg@skill_learning.skill_proposal.llm_cfg: gpt-5.4
+  - skill_proposal/llm_cfg@skill_learning.skill_proposal.llm_cfg: gpt-5.4-openrouter
   - _self_
 
 name: pattern_learning
@@ -190,6 +190,7 @@ skill_learning:
   #       left: grass
   #       right: path
   initial_patterns:
+    load_from_planner_results: null
     add_center_only_placeholders: true
     presets: []
 

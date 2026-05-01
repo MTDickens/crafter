@@ -484,11 +484,15 @@ class KnownWorld:
     self._initial_world: Final[SimpleWorld] = copy(initial_world)
     self._world: SimpleWorld = copy(self._initial_world)
     self._mask: np.ndarray = np.zeros(self._world.area, dtype=bool)
+    self._perceived_mask: np.ndarray = np.zeros(self._world.area, dtype=bool)
+    self._imputed_mask: np.ndarray = np.zeros(self._world.area, dtype=bool)
+    self._imputed_materials: dict[tuple[int, int], str] = {}
     self.player_pos = np.array(player_pos, dtype=int)
     self.facing = tuple(facing)
     self.inventory = dict(inventory)
     self._craft_cluster_anchor: tuple[int, int] | None = None
     self._mask[tuple(self.player_pos)] = True
+    self._perceived_mask[tuple(self.player_pos)] = True
 
   def copy(self):
     """Return a planner-state copy of the known world.
@@ -506,6 +510,9 @@ class KnownWorld:
     )
     new_world._world = copy(self._world)
     new_world._mask = self._mask.copy()
+    new_world._perceived_mask = self._perceived_mask.copy()
+    new_world._imputed_mask = self._imputed_mask.copy()
+    new_world._imputed_materials = dict(self._imputed_materials)
     new_world._craft_cluster_anchor = self._craft_cluster_anchor
     return new_world
 
@@ -526,14 +533,15 @@ class KnownWorld:
 
   @property
   def revealed_cell_count(self) -> int:
-    """Return the number of revealed cells in the known-world mask.
+    """Return the number of cells perceived from the reveal source.
 
     Returns
     -------
     int
-        Count of ``True`` entries in the reveal mask.
+        Count of cells whose material came from an actual reveal, excluding
+        hard-inferred cells.
     """
-    return int(self._mask.sum())
+    return int(self._perceived_mask.sum())
 
   @property
   def known_mask(self) -> np.ndarray:
@@ -546,6 +554,16 @@ class KnownWorld:
         cells.
     """
     return self._mask.copy()
+
+  @property
+  def perceived_mask(self) -> np.ndarray:
+    """Return cells whose material came from the immutable reveal source."""
+    return self._perceived_mask.copy()
+
+  @property
+  def imputed_mask(self) -> np.ndarray:
+    """Return cells whose material was filled by hard pattern inference."""
+    return self._imputed_mask.copy()
 
   @property
   def initial_world(self) -> SimpleWorld:
@@ -567,6 +585,10 @@ class KnownWorld:
     """Return the immutable reveal-source material at a cell."""
     return self._initial_world[tuple(pos)][0]
 
+  def imputed_material_at(self, pos) -> str:
+    """Return the original material predicted for a hard-inferred cell."""
+    return self._imputed_materials[tuple(pos)]
+
   def reveal_cell(self, pos):
     """Reveal one unknown frontier cell.
 
@@ -583,6 +605,17 @@ class KnownWorld:
     frontier = set(self.frontier_unknowns())
     assert pos in frontier, f'Reveal target is not a legal frontier cell: {pos}'
     self._mask[pos] = True
+    self._perceived_mask[pos] = True
+
+  def impute_cell(self, pos, material: str):
+    """Fill one unknown cell with a material predicted by hard inference."""
+    pos = tuple(pos)
+    assert _inside((0, 0), pos, self._world.area), f'Out-of-bounds imputation: {pos}'
+    assert not self.is_known(pos), f'Grid is already known: {pos}'
+    self._world[pos] = material
+    self._mask[pos] = True
+    self._imputed_mask[pos] = True
+    self._imputed_materials[pos] = material
 
   def neighbors(self, pos):
     """Yield in-bounds 4-neighborhood cells around ``pos``."""

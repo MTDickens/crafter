@@ -97,6 +97,40 @@ def _collect_series(config: DictConfig) -> dict[str, tuple[list[int], list[float
   return series
 
 
+def _moving_average_series(
+    indices: list[int],
+    values: list[float],
+    window: int,
+) -> tuple[list[int], list[float]]:
+  assert window >= 1, f'plot.moving_average must be at least 1, got {window}'
+  assert len(indices) == len(values), (
+    f'Expected matching index/value lengths, got {len(indices)} and {len(values)}'
+  )
+  if window == 1:
+    return indices, values
+  assert len(values) >= window, (
+    f'plot.moving_average={window} requires at least {window} episodes, '
+    f'but only found {len(values)}.'
+  )
+  averaged_indices = indices[window - 1:]
+  averaged_values = [
+    float(np.mean(values[index - window + 1:index + 1]))
+    for index in range(window - 1, len(values))
+  ]
+  return averaged_indices, averaged_values
+
+
+def _apply_plot_moving_average(
+    config: DictConfig,
+    series: dict[str, tuple[list[int], list[float]]],
+) -> dict[str, tuple[list[int], list[float]]]:
+  window = int(config.plot.moving_average)
+  return {
+    label: _moving_average_series(indices, values, window)
+    for label, (indices, values) in series.items()
+  }
+
+
 def _pattern_entries(payload: dict) -> list[dict]:
   assert 'pattern_learning_library' in payload, (
     'Pattern-library output is missing from planner_results.json. '
@@ -377,7 +411,7 @@ def _print_and_optionally_save_stats(config: DictConfig):
 def _plot_series(config: DictConfig):
   if not bool(config.plot.enabled):
     return
-  series = _collect_series(config)
+  series = _apply_plot_moving_average(config, _collect_series(config))
   layout = str(config.plot.layout)
   assert layout in {'same_axes', 'separate_axes'}, f'Unsupported plot layout: {layout}'
   output_path = Path(config.plot.output_path).resolve()

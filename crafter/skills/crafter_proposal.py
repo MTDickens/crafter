@@ -258,6 +258,7 @@ def propose_crafter_patterns_from_partial_maps(
   prompt_examples: list[CrafterProposalPromptExample],
   codec: CrafterTileCodec,
   skill_proposal_cfg: DictConfig,
+  proposal_log_dir: Path | None = None,
 ) -> list[CrossShapedPattern]:
   """Propose new Crafter cross patterns from prepared prompt examples."""
   prompt = build_crafter_skill_proposal_prompt(
@@ -268,6 +269,10 @@ def propose_crafter_patterns_from_partial_maps(
     prompt_token_case=str(skill_proposal_cfg.prompt_token_case),
   )
   response_text = get_crafter_skill_proposal_text(skill_proposal_cfg, prompt)
+  if proposal_log_dir is not None:
+    proposal_log_dir.mkdir(parents=True, exist_ok=True)
+    (proposal_log_dir / 'input.txt').write_text(prompt)
+    (proposal_log_dir / 'output.txt').write_text(response_text)
   patterns = parse_crafter_skill_proposal_response(response_text, codec)
   if len(patterns) > int(skill_proposal_cfg.patterns_per_trigger):
     raise AssertionError(

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import math
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 import numpy as np
@@ -238,6 +241,7 @@ class CrafterSkillLearningManager:
       capacity=int(cfg.replay_buffer.capacity)
     )
     self._rng = np.random.default_rng(int(cfg.sampling_method.seed))
+    self.proposal_output_root: Path | None = None
     self.library = CrafterSkillLibrary(
       codec=self.codec,
       device=torch.device(str(cfg.device)),
@@ -246,6 +250,17 @@ class CrafterSkillLearningManager:
     self._initialize_patterns()
 
   def _initialize_patterns(self):
+    load_path = self.cfg.initial_patterns.get('load_from_planner_results', None)
+    if load_path is not None:
+      assert not bool(self.cfg.initial_patterns.add_center_only_placeholders), (
+        'initial_patterns.add_center_only_placeholders must be false when '
+        'load_from_planner_results is set.'
+      )
+      assert len(self.cfg.initial_patterns.presets) == 0, (
+        'initial_patterns.presets must be empty when load_from_planner_results is set.'
+      )
+      self._load_patterns_from_planner_results(Path(str(load_path)).expanduser())
+      return
     if bool(self.cfg.initial_patterns.add_center_only_placeholders):
       for class_id in range(self.codec.num_classes):
         self.library.add_pattern(CrossShapedPattern.make_ungated_center_only(class_id))
@@ -259,6 +274,35 @@ class CrafterSkillLearningManager:
           right_id=self.codec.encode_material(str(preset.right)),
         )
       )
+
+  def _load_patterns_from_planner_results(self, result_path: Path) -> None:
+    payload = json.loads(result_path.read_text())
+    library_payload = payload['pattern_learning_library']
+    for pattern_payload in library_payload['patterns']:
+      pattern = self._pattern_from_payload(pattern_payload)
+      raw_weight = self._raw_weight_from_payload(pattern_payload)
+      self.library.add_pattern(pattern, raw_weight=raw_weight)
+
+  def _pattern_from_payload(self, pattern_payload: dict) -> CrossShapedPattern:
+    center_id = self.codec.encode_material(str(pattern_payload['center']))
+    if not bool(pattern_payload['use_gating']):
+      return CrossShapedPattern.make_ungated_center_only(center_id)
+    return CrossShapedPattern(
+      center_id=center_id,
+      top_id=self.codec.encode_material(str(pattern_payload['top'])),
+      bottom_id=self.codec.encode_material(str(pattern_payload['bottom'])),
+      left_id=self.codec.encode_material(str(pattern_payload['left'])),
+      right_id=self.codec.encode_material(str(pattern_payload['right'])),
+    )
+
+  def _raw_weight_from_payload(self, pattern_payload: dict) -> float:
+    if 'raw_weight' in pattern_payload:
+      return float(pattern_payload['raw_weight'])
+    positive_weight = float(pattern_payload['positive_weight'])
+    assert positive_weight > 0.0, (
+      f'positive_weight must be positive to recover raw_weight, got {positive_weight}'
+    )
+    return math.log(math.expm1(positive_weight))
 
   def should_use_inference(self) -> bool:
     """Return whether reveal-time pattern inference is currently enabled."""
@@ -309,7 +353,7 @@ class CrafterSkillLearningManager:
     """Trigger online training if the configured interval is reached."""
     did_update = False
     if self.should_trigger_proposal(episode_index, total_episodes):
-      self._maybe_add_proposals(self.replay_buffer.get_all())
+      self._maybe_add_proposals(self.replay_buffer.get_all(), episode_index)
       did_update = True
     if not self.should_trigger_reweight(episode_index, total_episodes):
       return did_update
@@ -404,7 +448,16 @@ class CrafterSkillLearningManager:
       'Expected one of: first, last, random.'
     )
 
-  def _maybe_add_proposals(self, replay_entries: list[CrafterReplayEntry]) -> int:
+  def _proposal_log_dir(self, episode_index: int) -> Path | None:
+    if self.proposal_output_root is None:
+      return None
+    return self.proposal_output_root / 'proposals' / f'after-episode-{episode_index:05d}'
+
+  def _maybe_add_proposals(
+    self,
+    replay_entries: list[CrafterReplayEntry],
+    episode_index: int,
+  ) -> int:
     if not bool(self.cfg.skill_proposal.enabled):
       return 0
     self._prune_proposal_example_cache(replay_entries)
@@ -416,6 +469,7 @@ class CrafterSkillLearningManager:
       prompt_examples=selected_prompt_examples,
       codec=self.codec,
       skill_proposal_cfg=self.cfg.skill_proposal,
+      proposal_log_dir=self._proposal_log_dir(episode_index),
     )
     added = 0
     for pattern in proposed[: int(self.cfg.skill_proposal.patterns_per_trigger)]:

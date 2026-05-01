@@ -3,7 +3,8 @@ defaults:
   - override hydra/hydra_logging: disabled
   - _self_
 
-input_root: planner_results_260419
+# input_root: planner_results_260419
+input_root: planner_results_260430
 
 timestamps:
   # - 20260418T234848
@@ -17,10 +18,20 @@ timestamps:
   # - 20260419T180448
   # - 20260419T185828
   # - 20260419T185853
-  - 20260419T203915
-  - 20260421T014620
-  - 20260421T020539
-  - 20260421T200043
+
+  # - 20260419T203915
+  # - 20260421T014620
+  # - 20260421T020539
+  # - 20260421T200043
+
+  # - 20260430T140556 # w/o inference
+  # - 20260430T150354 # w/o reweight
+  # - 20260430T144626 # w/o initial placeholder patterns (incomplete)
+  # - 20260430T143246 # full
+
+    - 20260501T004553
+    - 20260501T004605
+    - 20260501T004608
 
 metrics:
   - metrics.reveal_count
@@ -35,10 +46,11 @@ plot:
   enabled: true
   metric: metrics.reveal_count
   layout: same_axes # same_axes or separate_axes
+  moving_average: 1 # trailing window; 1 disables smoothing
 
   # Matplotlib / output
   title: Planner Result Metric by Episode
-  output_path: plots/planner_result_stats_250419.png
+  output_path: plots/planner_result_stats_250430.png
 
 pattern_library:
   # Selection / export
@@ -49,7 +61,7 @@ pattern_library:
   plot:
     # Selection
     enabled: true
-    use_selected_patterns: true # false -> plot all logged patterns; true -> filter to patterns below
+    use_selected_patterns: false # false -> plot all logged patterns; true -> filter to patterns below
     add_center_only_placeholders: false # whether to also track ungated placeholder patterns
 
     # These are only the patterns to TRACK/DRAW in the stats plot below.
@@ -94,7 +106,7 @@ pattern_library:
 
     # Matplotlib / output
     title: Pattern Weights by Episode
-    output_path: plots/pattern_learning_weights_250419.png
+    output_path: plots/pattern_learning_weights_250430.png
 
     # Pattern-card rendering
     asset_dir: crafter/assets

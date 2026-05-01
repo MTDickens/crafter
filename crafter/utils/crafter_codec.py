@@ -154,9 +154,13 @@ class CrafterTileCodec:
         Long tensor of shape ``(H, W)`` where hidden cells are ``unknown_id``.
     """
     full_ids = self.encode_simple_world(known_world.initial_world, device='cpu')
-    partial_ids = full_ids.clone()
-    known_mask = torch.as_tensor(known_world.known_mask, dtype=torch.bool)
-    partial_ids[~known_mask] = self.unknown_id
+    partial_ids = torch.full_like(full_ids, fill_value=self.unknown_id)
+    perceived_mask = torch.as_tensor(known_world.perceived_mask, dtype=torch.bool)
+    partial_ids[perceived_mask] = full_ids[perceived_mask]
+    for x, y in zip(*np.nonzero(known_world.imputed_mask), strict=True):
+      partial_ids[int(x), int(y)] = self.encode_material(
+        known_world.imputed_material_at((int(x), int(y)))
+      )
     if device is not None:
       partial_ids = partial_ids.to(device)
     return partial_ids

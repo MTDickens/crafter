@@ -492,10 +492,13 @@ class TaskAndMotionPlanner:
         threshold=threshold,
         candidate_mask=candidate_mask,
     )
-    del updated
     for pos in inferred_positions:
       if not self._require_known_world().is_known(pos):
-        self._require_known_world().reveal_cell(pos)
+        material_id = int(updated[pos])
+        self._require_known_world().impute_cell(
+            pos,
+            self.codec.decode_material(material_id),
+        )
 
   def _pick_collect_reveal_target(self, candidates, reveal_requirement):
     if self.inference_library is None or self.skill_learning_cfg is None:
