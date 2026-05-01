@@ -4,7 +4,7 @@ defaults:
   - _self_
 
 # input_root: planner_results_260419
-input_root: planner_results_260430
+input_root: planner_results_final/PITWI wo initial placeholder
 
 timestamps:
   # - 20260418T234848
@@ -29,9 +29,16 @@ timestamps:
   # - 20260430T144626 # w/o initial placeholder patterns (incomplete)
   # - 20260430T143246 # full
 
-    - 20260501T004553
-    - 20260501T004605
-    - 20260501T004608
+    # - 20260501T004553
+    # - 20260501T004605
+    # - 20260501T004608
+
+  - 20260501T072237
+  - 20260501T072340
+  - 20260501T072654
+  - 20260501T072831
+  - 20260501T072847
+  - 20260501T073359
 
 metrics:
   - metrics.reveal_count

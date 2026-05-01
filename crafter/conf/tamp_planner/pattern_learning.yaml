@@ -1,7 +1,7 @@
 # @package planner
 
 defaults:
-  - skill_proposal/llm_cfg@skill_learning.skill_proposal.llm_cfg: gpt-5.4-openrouter
+  - skill_proposal/llm_cfg@skill_learning.skill_proposal.llm_cfg: gpt-5.4-happyapi
   - _self_
 
 name: pattern_learning
