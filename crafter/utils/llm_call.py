@@ -96,7 +96,7 @@ def get_completion_text(queries: list[str | Path], llm_cfg: DictConfig) -> str:
   client = OpenAI(api_key=llm_cfg.api_key, base_url=llm_cfg.base_url)
   content = construct_content(queries)
 
-  provider_extra = {'only': [provider]} if provider else None
+  provider_extra = {'provider': {'only': [provider]}} if provider else None
 
   kwargs = {
     'model': model_name,
