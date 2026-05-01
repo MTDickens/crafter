@@ -281,10 +281,11 @@ class CrafterSkillLibrary:
     partial_map_ids = partial_map_ids.to(device=self.device, dtype=torch.long)
     num_classes = self.codec.num_classes
     known = partial_map_ids != self.codec.unknown_id
+    inference_dtype = torch.float64
     uniform = torch.full(
         (num_classes, *partial_map_ids.shape),
         1.0 / num_classes,
-        dtype=torch.float32,
+        dtype=inference_dtype,
         device=self.device,
     )
     if not self.patterns:
@@ -292,12 +293,15 @@ class CrafterSkillLibrary:
     else:
       numerators = torch.zeros_like(uniform)
       denominator = torch.zeros(
-          partial_map_ids.shape, dtype=torch.float32, device=self.device)
-      weights = self.positive_weights()
+          partial_map_ids.shape, dtype=inference_dtype, device=self.device)
+      weights = self.positive_weights().to(dtype=inference_dtype)
+      if torch.any(torch.isnan(weights)) or torch.any(torch.isinf(weights)):
+        raise AssertionError('Pattern weights contain nan/inf.')
       for index, pattern in enumerate(self.patterns):
         skill = GatedCrafterCrossSkill(pattern, self.codec)
-        gate = skill.gating_mask(partial_map_ids).to(dtype=torch.float32)
-        output = skill.output_distribution(partial_map_ids, eps=eps)
+        gate = skill.gating_mask(partial_map_ids).to(dtype=inference_dtype)
+        output = skill.output_distribution(
+            partial_map_ids, eps=eps).to(dtype=inference_dtype)
         numerators += weights[index] * gate.unsqueeze(0) * output
         denominator += weights[index] * gate
       inferred = uniform.clone()
@@ -305,15 +309,20 @@ class CrafterSkillLibrary:
       if torch.any(torch.isnan(denominator)) or torch.any(torch.isinf(denominator)):
         raise AssertionError('Pattern-weight denominator contains nan/inf.')
       inferred[:, active] = numerators[:, active] / denominator[active].unsqueeze(0)
-    known_one_hot = self._known_one_hot(partial_map_ids)
+    known_one_hot = self._known_one_hot(partial_map_ids).to(dtype=inference_dtype)
     inferred[:, known] = known_one_hot[:, known]
+    column_sums = inferred.sum(dim=0, keepdim=True)
+    if torch.any(torch.isnan(column_sums)) or torch.any(torch.isinf(column_sums)):
+      raise AssertionError('Inferred probability sums contain nan/inf.')
+    assert torch.all(column_sums > 0), 'Inferred probability sums must be positive.'
+    inferred = inferred / column_sums
     column_sums = inferred.sum(dim=0)
     assert torch.allclose(
         column_sums,
         torch.ones_like(column_sums),
         atol=1e-5,
     ), 'Inferred probabilities must sum to 1 at every cell.'
-    return inferred
+    return inferred.to(dtype=torch.float32)
 
   def maybe_hard_infer(
       self,
@@ -381,4 +390,3 @@ class CrafterSkillLibrary:
     inferred = self.infer_probs(partial_map_ids, eps=eps)
     scores = inferred[class_ids].sum(dim=0)
     return scores * candidate_mask.to(device=scores.device, dtype=scores.dtype)
-
