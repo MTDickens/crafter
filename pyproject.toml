@@ -45,6 +45,10 @@ Homepage = "http://github.com/danijar/crafter"
 
 [project.optional-dependencies]
 gui = ["pygame"]
+proposal-token-stats = [
+    "tiktoken>=0.12.0",
+    "transformers>=5.7.0",
+]
 
 [project.scripts]
 crafter = "crafter.run_gui:main"
