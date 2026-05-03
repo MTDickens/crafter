@@ -29,6 +29,7 @@ runtime:
   daylight_cycle: false
 
 map_generation:
+  noise_scale: 1.0
   max_reset_attempts: 20
   minimum_resources:
     tree: 9

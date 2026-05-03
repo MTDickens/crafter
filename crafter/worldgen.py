@@ -7,22 +7,26 @@ from . import constants
 from . import objects
 
 
-def generate_world(world, player):
+def generate_world(world, player, noise_scale=1.0):
+  noise_scale = float(noise_scale)
+  if noise_scale <= 0.0:
+    raise ValueError(f'noise_scale must be positive, got {noise_scale}.')
   simplex = opensimplex.OpenSimplex(seed=world.random.randint(0, 2 ** 31 - 1))
   tunnels = np.zeros(world.area, bool)
   for x in range(world.area[0]):
     for y in range(world.area[1]):
-      _set_material(world, (x, y), player, tunnels, simplex)
+      _set_material(world, (x, y), player, tunnels, simplex, noise_scale)
   for x in range(world.area[0]):
     for y in range(world.area[1]):
-      _set_object(world, (x, y), player, tunnels)
+      _set_object(world, (x, y), player, tunnels, noise_scale)
 
 
-def _set_material(world, pos, player, tunnels, simplex):
+def _set_material(world, pos, player, tunnels, simplex, noise_scale):
   x, y = pos
-  simplex = functools.partial(_simplex, simplex)
+  simplex = functools.partial(_simplex, simplex, noise_scale=noise_scale)
   uniform = world.random.uniform
-  start = 4 - np.sqrt((x - player.pos[0]) ** 2 + (y - player.pos[1]) ** 2)
+  player_dist = np.sqrt((x - player.pos[0]) ** 2 + (y - player.pos[1]) ** 2)
+  start = 4 - player_dist / noise_scale
   start += 2 * simplex(x, y, 8, 3)
   start = 1 / (1 + np.exp(-start))
   water = simplex(x, y, 3, {15: 1, 5: 0.15}, False) + 0.1
@@ -61,7 +65,7 @@ def _set_material(world, pos, player, tunnels, simplex):
       world[x, y] = 'grass'
 
 
-def _set_object(world, pos, player, tunnels):
+def _set_object(world, pos, player, tunnels, noise_scale):
   if not world.runtime_rules.allows_spawn(is_random=True):
     return
   x, y = pos
@@ -70,23 +74,24 @@ def _set_object(world, pos, player, tunnels):
   material, _ = world[x, y]
   if material not in constants.walkable:
     pass
-  elif dist > 3 and material == 'grass' and uniform() > 0.985:
+  elif dist > 3 * noise_scale and material == 'grass' and uniform() > 0.985:
     world.add(objects.Cow(world, (x, y)))
-  elif dist > 10 and uniform() > 0.993:
+  elif dist > 10 * noise_scale and uniform() > 0.993:
     world.add(objects.Zombie(world, (x, y), player))
   elif material == 'path' and tunnels[x, y] and uniform() > 0.95:
     world.add(objects.Skeleton(world, (x, y), player))
 
 
-def _simplex(simplex, x, y, z, sizes, normalize=True):
+def _simplex(simplex, x, y, z, sizes, normalize=True, noise_scale=1.0):
   if not isinstance(sizes, dict):
     sizes = {sizes: 1}
   value = 0
   for size, weight in sizes.items():
+    scaled_size = size * noise_scale
     if hasattr(simplex, 'noise3d'):
-      noise = simplex.noise3d(x / size, y / size, z)
+      noise = simplex.noise3d(x / scaled_size, y / scaled_size, z)
     else:
-      noise = simplex.noise3(x / size, y / size, z)
+      noise = simplex.noise3(x / scaled_size, y / scaled_size, z)
     value += weight * noise
   if normalize:
     value /= sum(sizes.values())

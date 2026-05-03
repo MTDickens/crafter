@@ -30,7 +30,8 @@ class Env(BaseClass):
       spawn_objects=True, spawn_random_objects=True,
       move_objects=True, move_random_objects=True,
       hunger_decreases=True, thirst_decreases=True,
-      energy_decreases=True, daylight_cycle=True):
+      energy_decreases=True, daylight_cycle=True,
+      worldgen_noise_scale=1.0):
     view = np.array(view if hasattr(view, '__len__') else (view, view))
     size = np.array(size if hasattr(size, '__len__') else (size, size))
     if np.any(size < view):
@@ -44,6 +45,11 @@ class Env(BaseClass):
     self._reward = reward
     self._length = length
     self._seed = seed
+    self._worldgen_noise_scale = float(worldgen_noise_scale)
+    if self._worldgen_noise_scale <= 0.0:
+      raise ValueError(
+          f'worldgen_noise_scale must be positive, got '
+          f'{self._worldgen_noise_scale}.')
     self._episode = 0
     self._runtime_rules = engine.RuntimeRules(
         spawn_objects=spawn_objects,
@@ -96,7 +102,9 @@ class Env(BaseClass):
     self._last_health = self._player.health
     self._world.add(self._player)
     self._unlocked = set()
-    worldgen.generate_world(self._world, self._player)
+    worldgen.generate_world(
+        self._world, self._player,
+        noise_scale=self._worldgen_noise_scale)
     return self._obs()
 
   def step(self, action):

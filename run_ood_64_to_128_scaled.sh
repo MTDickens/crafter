@@ -11,7 +11,8 @@ planner.skill_learning.enable_reweighting=false \
 planner.skill_learning.skill_proposal.enabled=false \
 planner.skill_learning.initial_patterns.add_center_only_placeholders=false \
 seed=42 episodes=100 'area=[128,128]' \
-planner.output_dir="planner_results_final_ood_64_to_128/PITWI wo inference"
+map_generation.noise_scale=2.0 \
+planner.output_dir="planner_results_final_ood_64_to_128_scaled/PITWI wo inference"
 
 # OOD 64 -> 128, w/o proposal or reweighting.
 
@@ -24,7 +25,8 @@ planner.skill_learning.initial_patterns.add_center_only_placeholders=false \
 seed=42 \
 episodes=100 \
 'area=[128,128]' \
-planner.output_dir="planner_results_final_ood_64_to_128/PITWI wo proposal wo reweighting"
+map_generation.noise_scale=2.0 \
+planner.output_dir="planner_results_final_ood_64_to_128_scaled/PITWI wo proposal wo reweighting"
 
 # # OOD 64 -> 128, w/o proposal and w/ reweighting.
 
@@ -37,4 +39,5 @@ planner.output_dir="planner_results_final_ood_64_to_128/PITWI wo proposal wo rew
 # seed=42 \
 # episodes=100 \
 # 'area=[128,128]' \
-# planner.output_dir="planner_results_final_ood_64_to_128/PITWI wo proposal"
+# map_generation.noise_scale=2.0 \
+# planner.output_dir="planner_results_final_ood_64_to_128_scaled/PITWI wo proposal"

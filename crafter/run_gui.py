@@ -156,6 +156,9 @@ def _validate_config(config: DictConfig):
   assert config.map_generation.max_reset_attempts >= 1, (
       'map_generation.max_reset_attempts must be at least 1.'
   )
+  assert config.map_generation.noise_scale > 0, (
+      'map_generation.noise_scale must be positive.'
+  )
   for resource_name in config_resource_names():
     assert config.map_generation.minimum_resources[resource_name] >= 0, (
         f'map_generation.minimum_resources.{resource_name} must be non-negative.'
@@ -170,6 +173,7 @@ def _make_env(config: DictConfig, episode_index: int):
       size=size,
       length=config.length,
       seed=_episode_seed(config, episode_index),
+      worldgen_noise_scale=config.map_generation.noise_scale,
       spawn_objects=config.runtime.spawn_objects,
       spawn_random_objects=config.runtime.spawn_random_objects,
       move_objects=config.runtime.move_objects,
