@@ -120,9 +120,8 @@ def _episode_category_shares(
     category_weights[category] += _pattern_weight(pattern)
 
   total = sum(category_weights.values())
-  assert total > 0.0, (
-    f'No positive pattern weight found for episode {payload.get("episode_index")}'
-  )
+  if total <= 0.0:
+    return {category: np.nan for category in _CATEGORY_ORDER}
   return {
     category: category_weights[category] / total
     for category in _CATEGORY_ORDER
