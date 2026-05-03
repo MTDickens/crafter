@@ -41,7 +41,7 @@ map_generation:
 planner:
   enabled: true
   exit_on_finish: true
-  output_dir: planner_results_260430
+  output_dir: null
   plan_only: true
   render_known_world: none # none, task, step (not implemented)
   render_final_full_map: true

@@ -2,6 +2,7 @@
 
 defaults:
   - skill_proposal/llm_cfg@skill_learning.skill_proposal.llm_cfg: gpt-5.4-happyapi
+  # - skill_proposal/llm_cfg@skill_learning.skill_proposal.llm_cfg: qwen3-vl-235b-a22b-instruct
   - _self_
 
 name: pattern_learning

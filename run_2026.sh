@@ -1,8 +1,9 @@
-# # PITWI
+# PITWI
 
-# uv run python -m crafter.run_gui planner.skill_learning.enable_inference=true planner.skill_learning.enable_reweighting=true planner.skill_learning.skill_proposal.enabled=true \
-# planner.skill_learning.initial_patterns.add_center_only_placeholders=true \
-# seed=2026
+uv run python -m crafter.run_gui planner.skill_learning.enable_inference=true planner.skill_learning.enable_reweighting=true planner.skill_learning.skill_proposal.enabled=true \
+planner.skill_learning.initial_patterns.add_center_only_placeholders=true \
+seed=2026 \
+planner.output_dir=planner_results_final_qwen3_vl/PITWI
 
 # # PITWI w/o inference
 
@@ -10,17 +11,19 @@
 # planner.skill_learning.initial_patterns.add_center_only_placeholders=true \
 # seed=2026
 
-# # PITWI w/o reweighting
+# PITWI w/o reweighting
 
-# uv run python -m crafter.run_gui planner.skill_learning.enable_inference=true planner.skill_learning.enable_reweighting=false planner.skill_learning.skill_proposal.enabled=true \
-# planner.skill_learning.initial_patterns.add_center_only_placeholders=true \
-# seed=2026
+uv run python -m crafter.run_gui planner.skill_learning.enable_inference=true planner.skill_learning.enable_reweighting=false planner.skill_learning.skill_proposal.enabled=true \
+planner.skill_learning.initial_patterns.add_center_only_placeholders=true \
+seed=2026 \
+planner.output_dir="planner_results_final_qwen3_vl/PITWI wo reweighting"
 
 # PITWI w/o initial placeholder patterns
 
 uv run python -m crafter.run_gui planner.skill_learning.enable_inference=true planner.skill_learning.enable_reweighting=true planner.skill_learning.skill_proposal.enabled=true \
 planner.skill_learning.initial_patterns.add_center_only_placeholders=false \
-seed=2026
+seed=2026 \
+planner.output_dir="planner_results_final_qwen3_vl/PITWI wo initial placeholder"
 
 # PITWI + initial all ground truth patterns
 
