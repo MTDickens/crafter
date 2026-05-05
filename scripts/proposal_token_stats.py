@@ -70,9 +70,9 @@ def _gpt54_counter() -> ProposalTokenCounter:
 
   def count_output(text: str) -> TokenCounts:
     content_tokens = len(encoding.encode(text))
-    message_tokens = len(encoding.encode(
-      _openrouter_completion_message('assistant', text)
-    ))
+    message_tokens = len(
+      encoding.encode(_openrouter_completion_message('assistant', text))
+    )
     return TokenCounts(
       content_tokens=content_tokens,
       framing_tokens=message_tokens - content_tokens,
@@ -142,13 +142,30 @@ def _timestamp_dir(input_root: Path, timestamp: str) -> Path:
   return timestamp_dir
 
 
+def _max_episode_index(config: DictConfig) -> int | None:
+  value = config.get('max_episode_index', None)
+  if value is None:
+    return None
+  value = int(value)
+  assert value >= 0, f'max_episode_index must be non-negative, got {value}'
+  return value
+
+
+def _exclude_last_proposal(config: DictConfig) -> bool:
+  return bool(config.get('exclude_last_proposal', False))
+
+
 def _proposal_episode_index(proposal_dir: Path) -> int:
   match = _PROPOSAL_DIR_RE.match(proposal_dir.name)
   assert match is not None, f'Invalid proposal directory name: {proposal_dir}'
   return int(match.group(1))
 
 
-def _complete_proposal_dirs(timestamp_dir: Path) -> list[Path]:
+def _complete_proposal_dirs(
+  timestamp_dir: Path,
+  max_episode_index: int | None = None,
+  exclude_last_proposal: bool = False,
+) -> list[Path]:
   proposals_dir = timestamp_dir / 'proposals'
   proposal_dirs = []
   if proposals_dir.exists():
@@ -159,16 +176,25 @@ def _complete_proposal_dirs(timestamp_dir: Path) -> list[Path]:
       and _PROPOSAL_DIR_RE.match(path.name)
       and (path / 'input.txt').exists()
       and (path / 'output.txt').exists()
+      and (
+        max_episode_index is None or _proposal_episode_index(path) <= max_episode_index
+      )
     ]
   proposal_dirs.sort(key=_proposal_episode_index)
-  assert proposal_dirs, f'No complete proposal input/output pairs found under {proposals_dir}'
+  if exclude_last_proposal and proposal_dirs:
+    proposal_dirs = proposal_dirs[:-1]
+  assert proposal_dirs, (
+    f'No complete proposal input/output pairs found under {proposals_dir} '
+    f'with max_episode_index={max_episode_index} '
+    f'and exclude_last_proposal={exclude_last_proposal}'
+  )
   return proposal_dirs
 
 
 def _proposal_record(
-    timestamp: str,
-    proposal_dir: Path,
-    counter: ProposalTokenCounter,
+  timestamp: str,
+  proposal_dir: Path,
+  counter: ProposalTokenCounter,
 ) -> dict:
   input_text = (proposal_dir / 'input.txt').read_text()
   output_text = (proposal_dir / 'output.txt').read_text()
@@ -193,7 +219,9 @@ def _summary(records: list[dict], timestamp: str) -> dict:
   input_tokens = sum(int(record['input_tokens']) for record in records)
   output_tokens = sum(int(record['output_tokens']) for record in records)
   total_tokens = input_tokens + output_tokens
-  assert proposal_count > 0, f'Cannot summarize empty proposal record list for {timestamp}'
+  assert proposal_count > 0, (
+    f'Cannot summarize empty proposal record list for {timestamp}'
+  )
   return {
     'timestamp': timestamp,
     'proposal_count': proposal_count,
@@ -210,13 +238,19 @@ def _collect_stats(config: DictConfig) -> dict:
   input_root = Path(config.input_root).resolve()
   model = str(config.model)
   counter = _token_counter(model)
+  max_episode_index = _max_episode_index(config)
+  exclude_last_proposal = _exclude_last_proposal(config)
   timestamp_summaries = []
   proposal_records = []
   for timestamp_value in config.timestamps:
     timestamp = str(timestamp_value)
     timestamp_records = [
       _proposal_record(timestamp, proposal_dir, counter)
-      for proposal_dir in _complete_proposal_dirs(_timestamp_dir(input_root, timestamp))
+      for proposal_dir in _complete_proposal_dirs(
+        _timestamp_dir(input_root, timestamp),
+        max_episode_index=max_episode_index,
+        exclude_last_proposal=exclude_last_proposal,
+      )
     ]
     timestamp_summaries.append(_summary(timestamp_records, timestamp))
     proposal_records.extend(timestamp_records)
@@ -224,10 +258,10 @@ def _collect_stats(config: DictConfig) -> dict:
     'model': model,
     'tokenizer_name': counter.tokenizer_name,
     'input_root': str(input_root),
+    'max_episode_index': max_episode_index,
+    'exclude_last_proposal': exclude_last_proposal,
     'counting_mode': (
-      'openai_compatible_chat_completions'
-      if model == 'gpt-5.4'
-      else 'raw_text'
+      'openai_compatible_chat_completions' if model == 'gpt-5.4' else 'raw_text'
     ),
     'timestamp_summaries': timestamp_summaries,
     'overall_summary': _summary(proposal_records, 'OVERALL'),
@@ -254,7 +288,9 @@ def _print_table(payload: dict) -> None:
   print('  '.join(header.rjust(widths[header]) for header in headers))
   print('  '.join('-' * widths[header] for header in headers))
   for row in rows:
-    print('  '.join(_format_cell(row[header]).rjust(widths[header]) for header in headers))
+    print(
+      '  '.join(_format_cell(row[header]).rjust(widths[header]) for header in headers)
+    )
 
 
 def _format_cell(value) -> str:

@@ -45,14 +45,35 @@ def _episode_dirs(timestamp_dir: Path) -> list[Path]:
   return episode_dirs
 
 
-def _load_episode_payloads(timestamp_dir: Path) -> list[dict]:
+def _max_episode_index(config: DictConfig) -> int | None:
+  value = config.get('max_episode_index', None)
+  if value is None:
+    return None
+  value = int(value)
+  assert value >= 0, f'max_episode_index must be non-negative, got {value}'
+  return value
+
+
+def _load_episode_payloads(
+  timestamp_dir: Path,
+  max_episode_index: int | None = None,
+) -> list[dict]:
   payloads = []
   for episode_dir in _episode_dirs(timestamp_dir):
     result_path = episode_dir / 'planner_results.json'
     assert result_path.exists(), f'Missing planner_results.json: {result_path}'
     with result_path.open() as file:
       payload = json.load(file)
+    if (
+      max_episode_index is not None
+      and int(payload['episode_index']) > max_episode_index
+    ):
+      continue
     payloads.append(payload)
+  assert payloads, (
+    f'No episode payloads found under {timestamp_dir} '
+    f'with max_episode_index={max_episode_index}'
+  )
   return payloads
 
 
@@ -80,6 +101,35 @@ def _compute_mean(payloads: list[dict], metric_name: str) -> float:
   return float(np.mean(values))
 
 
+def _sample_stdev_or_none(values: np.ndarray) -> float | None:
+  if values.size < 2:
+    return None
+  return float(np.std(values, ddof=1))
+
+
+def _add_all_timestamp_stats(config: DictConfig, stats: dict) -> None:
+  all_timestamp_cfg = config.stats.get('all_timestamps', {})
+  if not bool(all_timestamp_cfg.get('enabled', False)):
+    return
+  include_mean = bool(all_timestamp_cfg.get('mean', True))
+  include_stdev = bool(all_timestamp_cfg.get('stdev', True))
+  timestamp_keys = [str(timestamp) for timestamp in config.timestamps]
+  aggregate = {}
+  for metric_name in config.metrics:
+    metric_key = str(metric_name)
+    values = np.asarray(
+      [float(stats[timestamp_key][metric_key]) for timestamp_key in timestamp_keys],
+      dtype=float,
+    )
+    metric_stats = {}
+    if include_mean:
+      metric_stats['mean'] = float(np.mean(values))
+    if include_stdev:
+      metric_stats['stdev'] = _sample_stdev_or_none(values)
+    aggregate[metric_key] = metric_stats
+  stats[str(all_timestamp_cfg.get('key', 'ALL_TIMESTAMPS'))] = aggregate
+
+
 def _timestamp_dir(input_root: Path, timestamp: str) -> Path:
   timestamp_dir = input_root / timestamp
   assert timestamp_dir.exists(), f'Timestamp directory does not exist: {timestamp_dir}'
@@ -88,9 +138,13 @@ def _timestamp_dir(input_root: Path, timestamp: str) -> Path:
 
 def _collect_series(config: DictConfig) -> dict[str, tuple[list[int], list[float]]]:
   input_root = Path(config.input_root).resolve()
+  max_episode_index = _max_episode_index(config)
   series = {}
   for timestamp in config.timestamps:
-    payloads = _load_episode_payloads(_timestamp_dir(input_root, str(timestamp)))
+    payloads = _load_episode_payloads(
+      _timestamp_dir(input_root, str(timestamp)),
+      max_episode_index=max_episode_index,
+    )
     indices = _episode_indices(payloads)
     values = [_get_metric(payload, str(config.plot.metric)) for payload in payloads]
     series[str(timestamp)] = (indices, values)
@@ -98,9 +152,9 @@ def _collect_series(config: DictConfig) -> dict[str, tuple[list[int], list[float
 
 
 def _moving_average_series(
-    indices: list[int],
-    values: list[float],
-    window: int,
+  indices: list[int],
+  values: list[float],
+  window: int,
 ) -> tuple[list[int], list[float]]:
   assert window >= 1, f'plot.moving_average must be at least 1, got {window}'
   assert len(indices) == len(values), (
@@ -112,17 +166,17 @@ def _moving_average_series(
     f'plot.moving_average={window} requires at least {window} episodes, '
     f'but only found {len(values)}.'
   )
-  averaged_indices = indices[window - 1:]
+  averaged_indices = indices[window - 1 :]
   averaged_values = [
-    float(np.mean(values[index - window + 1:index + 1]))
+    float(np.mean(values[index - window + 1 : index + 1]))
     for index in range(window - 1, len(values))
   ]
   return averaged_indices, averaged_values
 
 
 def _apply_plot_moving_average(
-    config: DictConfig,
-    series: dict[str, tuple[list[int], list[float]]],
+  config: DictConfig,
+  series: dict[str, tuple[list[int], list[float]]],
 ) -> dict[str, tuple[list[int], list[float]]]:
   window = int(config.plot.moving_average)
   return {
@@ -146,7 +200,7 @@ def _pattern_entries(payload: dict) -> list[dict]:
 
 
 def _collect_pattern_histories(
-    config: DictConfig,
+  config: DictConfig,
 ) -> dict[str, dict[str, object]]:
   input_root = Path(config.input_root).resolve()
   histories = {}
@@ -156,7 +210,10 @@ def _collect_pattern_histories(
   )
   for timestamp in config.timestamps:
     timestamp_key = str(timestamp)
-    payloads = _load_episode_payloads(_timestamp_dir(input_root, timestamp_key))
+    payloads = _load_episode_payloads(
+      _timestamp_dir(input_root, timestamp_key),
+      max_episode_index=_max_episode_index(config),
+    )
     indices = _episode_indices(payloads)
     pattern_metadata: dict[str, dict] = {}
     pattern_weights: dict[str, np.ndarray] = {}
@@ -230,18 +287,23 @@ def _pattern_spec_from_mapping(mapping, kind: str) -> dict[str, object]:
 def _selected_pattern_specs(config: DictConfig) -> list[dict[str, object]]:
   if not bool(config.pattern_library.plot.use_selected_patterns):
     return []
-  specs = [_pattern_spec_from_mapping(pattern, kind='selected') for pattern in config.pattern_library.plot.selected_patterns]
+  specs = [
+    _pattern_spec_from_mapping(pattern, kind='selected')
+    for pattern in config.pattern_library.plot.selected_patterns
+  ]
   if bool(config.pattern_library.plot.add_center_only_placeholders):
     specs = [
-      _pattern_spec_from_mapping(type('M', (), {'center': material})(), kind='placeholder')
+      _pattern_spec_from_mapping(
+        type('M', (), {'center': material})(), kind='placeholder'
+      )
       for material in _PLACEHOLDER_MATERIALS
     ] + specs
   return specs
 
 
 def _filter_pattern_histories(
-    config: DictConfig,
-    histories: dict[str, dict[str, object]],
+  config: DictConfig,
+  histories: dict[str, dict[str, object]],
 ) -> dict[str, dict[str, object]]:
   selected = _selected_pattern_specs(config)
   if not selected:
@@ -281,9 +343,9 @@ def _rgba255(color: tuple[float, float, float, float]) -> tuple[int, int, int, i
 
 def _load_font(font_size: int) -> ImageFont.ImageFont:
   for font_name in (
-      'DejaVuSans.ttf',
-      '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-      '/System/Library/Fonts/Supplemental/Arial.ttf',
+    'DejaVuSans.ttf',
+    '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+    '/System/Library/Fonts/Supplemental/Arial.ttf',
   ):
     try:
       return ImageFont.truetype(font_name, font_size)
@@ -300,13 +362,13 @@ def _asset_image(asset_dir: Path, name: str, tile_size: int) -> Image.Image:
 
 
 def _render_pattern_card(
-    asset_dir: Path,
-    pattern: dict[str, object],
-    tile_size: int,
-    card_padding: int,
-    label_height: int,
-    font_size: int,
-    outline_rgba: tuple[int, int, int, int],
+  asset_dir: Path,
+  pattern: dict[str, object],
+  tile_size: int,
+  card_padding: int,
+  label_height: int,
+  font_size: int,
+  outline_rgba: tuple[int, int, int, int],
 ) -> Image.Image:
   card_size = tile_size * 3 + card_padding * 2
   card = Image.new('RGBA', (card_size, card_size + label_height), (255, 255, 255, 255))
@@ -333,10 +395,10 @@ def _render_pattern_card(
 
 
 def _render_pattern_cards_strip(
-    config: DictConfig,
-    pattern_order: list[str],
-    metadata_by_key: dict[str, dict],
-    colors: list[tuple[float, float, float, float]],
+  config: DictConfig,
+  pattern_order: list[str],
+  metadata_by_key: dict[str, dict],
+  colors: list[tuple[float, float, float, float]],
 ) -> Image.Image:
   asset_dir = Path(config.pattern_library.plot.asset_dir).resolve()
   resolution_scale = int(config.pattern_library.plot.resolution_scale)
@@ -377,7 +439,9 @@ def _pattern_histories_jsonable(histories: dict[str, dict[str, object]]) -> dict
     for pattern_key, weights in pattern_weights.items():
       weight_by_episode = {}
       for episode_index, weight in zip(indices, weights.tolist(), strict=True):
-        weight_by_episode[str(episode_index)] = None if np.isnan(weight) else float(weight)
+        weight_by_episode[str(episode_index)] = (
+          None if np.isnan(weight) else float(weight)
+        )
       timestamp_payload['patterns'][pattern_key] = {
         **pattern_metadata[pattern_key],
         'weights_by_episode': weight_by_episode,
@@ -392,14 +456,19 @@ def _print_and_optionally_save_stats(config: DictConfig):
   reduction = str(config.stats.reduction)
   assert reduction == 'mean', f'Unsupported stats reduction: {reduction}'
   input_root = Path(config.input_root).resolve()
+  max_episode_index = _max_episode_index(config)
   stats = {}
   for timestamp in config.timestamps:
     timestamp_key = str(timestamp)
-    payloads = _load_episode_payloads(_timestamp_dir(input_root, timestamp_key))
+    payloads = _load_episode_payloads(
+      _timestamp_dir(input_root, timestamp_key),
+      max_episode_index=max_episode_index,
+    )
     stats[timestamp_key] = {
       metric_name: _compute_mean(payloads, str(metric_name))
       for metric_name in config.metrics
     }
+  _add_all_timestamp_stats(config, stats)
   print(json.dumps(stats, indent=2, sort_keys=True))
   if config.stats.output_path is not None:
     output_path = Path(config.stats.output_path).resolve()
@@ -497,7 +566,9 @@ def _plot_pattern_library(config: DictConfig):
   yscale = str(config.pattern_library.plot.yscale)
   assert yscale in {'linear', 'log'}, f'Unsupported yscale: {yscale}'
   if yscale == 'log':
-    assert global_ymin > 0.0, 'Log-scale pattern plots require strictly positive weights.'
+    assert global_ymin > 0.0, (
+      'Log-scale pattern plots require strictly positive weights.'
+    )
 
   draw_patterns = bool(config.pattern_library.plot.draw_patterns)
   if draw_patterns:
@@ -539,7 +610,9 @@ def _plot_pattern_library(config: DictConfig):
         )
         card_ax.imshow(card_image)
       else:
-        card_ax.text(0.5, 0.5, 'No selected patterns appeared.', ha='center', va='center')
+        card_ax.text(
+          0.5, 0.5, 'No selected patterns appeared.', ha='center', va='center'
+        )
       card_ax.axis('off')
       card_ax.set_title(f'{timestamp} patterns')
     for pattern_key, color in zip(pattern_order, colors, strict=True):

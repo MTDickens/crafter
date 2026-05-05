@@ -1,0 +1,48 @@
+defaults:
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+  - _self_
+
+targets:
+  - dir: planner_results_final/PITWI
+    name: ours
+  - dir: planner_results_final/PITWI wo inference
+    name: no inference
+  - dir: planner_results_final/PITWI wo reweighting
+    name: no reweighting
+  # - dir: planner_results_final/PITWI wo initial placeholder
+  #   name: no placeholder
+
+# targets:
+#   - dir: planner_results_final_qwen3_vl/PITWI
+#     name: ours
+#   - dir: planner_results_final_qwen3_vl/PITWI wo inference
+#     name: no inference
+#   - dir: planner_results_final_qwen3_vl/PITWI wo reweighting
+#     name: no reweighting
+
+episode: 100
+metric: metrics.reveal_count
+
+# Cross-timestamp center line aggregation.
+# median is more robust to outlier runs; set to mean to recover the old behavior.
+aggregation: median
+
+title: Crafter
+
+# The shaded band still uses sample standard deviation across timestamps,
+# drawn around the selected aggregation center line.
+show_std: true
+zero_based_episode_index: true
+
+gaussian_smoothing:
+  enabled: true
+  sigma: 5.0
+  truncate: 3.0
+
+out_path: results/figures/crafter_reveal_count.png
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

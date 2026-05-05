@@ -3,15 +3,60 @@ defaults:
   - override hydra/hydra_logging: disabled
   - _self_
 
-input_root: planner_results_final/PITWI wo initial placeholder
+input_root: planner_results_final/PITWI
+# input_root: planner_results_final/PITWI wo inference
+# input_root: planner_results_final/PITWI wo reweighting
+# input_root: planner_results_final/PITWI wo initial placeholder
+
+
+# Inclusive cutoff. null means use all proposal logs.
+# For example, 49 means proposals after episodes 0, 1, ..., 49.
+max_episode_index: 49
+
+# If true, drop the last remaining proposal log per timestamp after applying
+# max_episode_index. For example, with max_episode_index=49, this excludes
+# after-episode-00049 when that proposal exists.
+exclude_last_proposal: true
 
 timestamps:
-  - 20260501T072237
-  - 20260501T072340
-  - 20260501T072654
-  - 20260501T072831
-  - 20260501T072847
-  - 20260501T073359
+  # planner_results_final/PITWI
+  - 20260501T010512
+  - 20260501T010514
+  - 20260501T010516
+  - 20260501T010519
+  - 20260501T010522
+  - 20260501T010524
+  - 20260501T010528
+  - 20260501T010531
+  - 20260501T010533
+
+  # # planner_results_final/PITWI wo inference
+  # - 20260501T004553
+  # - 20260501T004605
+  # - 20260501T004608
+
+  # # planner_results_final/PITWI wo reweighting
+  # - 20260501T061654
+  # - 20260501T061713
+  # - 20260501T061715
+  # - 20260501T061718
+  # - 20260501T061722
+  # - 20260501T061724
+  # - 20260501T061730
+  # - 20260501T061731
+  # - 20260501T061734
+
+  # # planner_results_final/PITWI wo initial placeholder
+  # - 20260501T072237
+  # - 20260501T072340
+  # - 20260501T072654
+  # - 20260501T072831
+  # - 20260501T072847
+  # - 20260501T073359
+  # - 20260501T133155
+  # - 20260501T133201
+  # - 20260501T133204
+
 
 # Currently supported: gpt-5.4, qwen3_vl
 model: gpt-5.4

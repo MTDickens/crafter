@@ -4,44 +4,126 @@ defaults:
   - _self_
 
 # input_root: planner_results_260419
-input_root: planner_results_final/PITWI wo initial placeholder
+
+input_root: planner_results_final/PITWI
+# input_root: planner_results_final/PITWI wo inference
+# input_root: planner_results_final/PITWI wo reweighting
+# input_root: planner_results_final/PITWI wo initial placeholder
+
+
+# input_root: planner_results_final_qwen3_vl/PITWI
+# input_root: planner_results_final_qwen3_vl/PITWI wo initial placeholder
+# input_root: planner_results_final_qwen3_vl/PITWI wo reweighting
+
+# input_root: planner_results_final_ood_64_to_128_unscaled/PITWI wo proposal wo reweighting
+# input_root: planner_results_final_ood_64_to_128_unscaled/PITWI wo inference
+# input_root: planner_results_final_ood_64_to_128_scaled/PITWI wo proposal wo reweighting
+# input_root: planner_results_final_ood_64_to_128_scaled/PITWI wo inference
+
+
+# input_root: planner_results_260430
+
+# Inclusive cutoff. null means use all discovered episodes.
+# For example, 49 means episodes 0, 1, ..., 49.
+max_episode_index: 49
 
 timestamps:
-  # - 20260418T234848
-  # - 20260419T001041
-  # - 20260419T014812
-  # - 20260419T014830
-  # - 20260419T021030
-  # - 20260419T023525
-  # - 20260419T025702
-  # - 20260419T175547
-  # - 20260419T180448
-  # - 20260419T185828
-  # - 20260419T185853
+  # planner_results_final/PITWI
+  - 20260501T010512
+  - 20260501T010514
+  - 20260501T010516
+  - 20260501T010519
+  - 20260501T010522
+  - 20260501T010524
+  - 20260501T010528
+  - 20260501T010531
+  - 20260501T010533
 
-  # - 20260419T203915
-  # - 20260421T014620
-  # - 20260421T020539
-  # - 20260421T200043
+  # # planner_results_final/PITWI wo inference
+  # - 20260501T004553
+  # - 20260501T004605
+  # - 20260501T004608
 
-  # - 20260430T140556 # w/o inference
-  # - 20260430T150354 # w/o reweight
-  # - 20260430T144626 # w/o initial placeholder patterns (incomplete)
-  # - 20260430T143246 # full
+  # # planner_results_final/PITWI wo reweighting
+  # - 20260501T061654
+  # - 20260501T061713
+  # - 20260501T061715
+  # - 20260501T061718
+  # - 20260501T061722
+  # - 20260501T061724
+  # - 20260501T061730
+  # - 20260501T061731
+  # - 20260501T061734
 
-    # - 20260501T004553
-    # - 20260501T004605
-    # - 20260501T004608
+  # # planner_results_final/PITWI wo initial placeholder
+  # - 20260501T072237
+  # - 20260501T072340
+  # - 20260501T072654
+  # - 20260501T072831
+  # - 20260501T072847
+  # - 20260501T073359
+  # - 20260501T133155
+  # - 20260501T133201
+  # - 20260501T133204
 
-  - 20260501T072237
-  - 20260501T072340
-  - 20260501T072654
-  - 20260501T072831
-  - 20260501T072847
-  - 20260501T073359
-  - 20260501T133155
-  - 20260501T133201
-  - 20260501T133204
+
+
+
+
+
+
+
+
+
+  # # planner_results_final_qwen3_vl/PITWI
+  # - 20260501T190132
+  # - 20260501T191001 # 1209.44, 离群点
+  # - 20260501T191002
+  # - 20260501T231735
+  # - 20260501T231736
+  # - 20260501T231737
+  # - 20260501T231745
+  # - 20260501T231747
+  # - 20260501T231750
+
+  # # planner_results_final_qwen3_vl/PITWI wo initial placeholder
+  # - 20260501T235642
+  # - 20260501T235850
+  # - 20260502T000100
+  # - 20260502T032304
+  # - 20260502T032518
+  # - 20260502T032613
+  # - 20260502T033353
+  # - 20260502T033357
+  # - 20260502T034016
+
+  # # planner_results_final_qwen3_vl/PITWI wo reweighting
+  # - 20260501T231808
+  # - 20260501T231811
+  # - 20260501T231814
+  # - 20260502T024947
+  # - 20260502T025022
+  # - 20260502T025055
+  # - 20260502T025725
+  # - 20260502T030200
+  # - 20260502T030524
+
+  # planner_results_final_ood_64_to_128_unscaled/PITWI wo proposal wo reweighting
+  # - 20260503T160743
+
+  # # planner_results_final_ood_64_to_128_unscaled/PITWI wo inference
+  # - 20260503T162430
+
+  # # planner_results_final_ood_64_to_128_scaled/PITWI wo proposal wo reweighting
+  # - 20260503T165111
+
+  # # planner_results_final_ood_64_to_128_scaled/PITWI wo inference
+  # - 20260503T165108
+
+  # - 20260430T140556
+  # - 20260430T143246
+  # - 20260430T144626
+  # - 20260430T150354
 
 metrics:
   - metrics.reveal_count
@@ -49,6 +131,21 @@ metrics:
 stats:
   enabled: true
   reduction: mean
+
+  # Cross-timestamp summary of the per-timestamp reductions above.
+  # For each metric, this first computes one value per timestamp using
+  # stats.reduction, then summarizes those timestamp values.
+  all_timestamps:
+    enabled: true
+    key: ALL_TIMESTAMPS
+
+    # Mean over all configured timestamps.
+    mean: true
+
+    # Sample standard deviation over all configured timestamps.
+    # If only one timestamp is configured, stdev is reported as null.
+    stdev: true
+
   output_path: null
 
 plot:
@@ -125,7 +222,7 @@ pattern_library:
     label_height: 86
     resolution_scale: 2
     font_size: 12
-    background_rgba: [240, 240, 240, 255]
+    background_rgba: [ 240, 240, 240, 255 ]
 
 hydra:
   run:

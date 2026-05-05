@@ -5,7 +5,7 @@ defaults:
 seed: 2026
 headless: true
 episodes: 100
-workers: 100
+workers: 8
 area: [64, 64]
 view: [70, 70]
 length: null
